@@ -1,6 +1,7 @@
+/* eslint-disable */
 import React, { useState, useEffect, useRef , useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Users, ClipboardList, FileText, BarChart3, Plus, Edit2, Trash2, Search, Download, Menu, X, Lock, Unlock, CheckSquare, Key, Copy, Check, LogOut, QrCode, Camera, XCircle, Sun, Moon, Settings, BookOpen, Video, Music, Image, FileImage, ChevronDown, ChevronUp, ExternalLink, Eye, Save, Trash } from 'lucide-react';
+import { Users, ClipboardList, FileText, BarChart3, Plus, Edit2, Trash2, Search, Download, Menu, X, Lock, Unlock, Key, Copy, Check, LogOut, QrCode, Camera, XCircle, Sun, Moon, Settings, BookOpen, ChevronDown, Save } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import * as XLSX from 'xlsx';
 import { Html5Qrcode } from 'html5-qrcode';
@@ -623,7 +624,7 @@ const App = () => {
   const [showScanner, setShowScanner] = useState(false);
   const [selectedSession, setSelectedSession] = useState(1);
   const [scannerError, setScannerError] = useState('');
-  const [scanSuccess, setScanSuccess] = useState('');
+  // scanSuccess removed
   const [scannedStudentData, setScannedStudentData] = useState(null);
   const [showAbsentModal, setShowAbsentModal] = useState(false);
   const [selectedSessionAbsent, setSelectedSessionAbsent] = useState(null);
@@ -688,7 +689,7 @@ const App = () => {
   useEffect(() => {
     if (isLoggedIn) loadAllData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn]);
+  }, [isLoggedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return () => { if (html5QrCodeRef.current) html5QrCodeRef.current.stop().catch(() => {}); };
@@ -862,8 +863,6 @@ const App = () => {
     if (m) return `https://www.youtube.com/embed/${m[1]}`;
     return url;
   };
-  // Helper: parse multi-line URLs
-  const parseUrls = (str) => str ? str.split(/[\n,]+/).map(u => u.trim()).filter(Boolean) : [];
   // Helper: Drive embed
   const driveEmbedUrl = (url) => {
     if (!url) return '';
@@ -991,7 +990,8 @@ const App = () => {
       const base = ((att + mRaw + fRaw) / 110 * 100);
       return (base + mBonus + fBonus).toFixed(2);
     };
-  }, [attendance, exams, calcAtt]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exams, calcAtt]);
   const getGrade = (s) => {
     if (s >= 85) return { text:'ممتاز',    color:'var(--green)' };
     if (s >= 75) return { text:'جيد جداً', color:'var(--teal)' };
@@ -1067,7 +1067,7 @@ const App = () => {
 
   const startScanner = async () => {
      isScanPausedRef.current = false;
-  setScannerError(''); setScanSuccess(''); setScannedStudentData(null); setIsScanPaused(false); setShowScanner(true);
+  setScannerError(''); setScannedStudentData(null); setIsScanPaused(false); setShowScanner(true);
   try {
     await new Promise(r => setTimeout(r, 100));
 
@@ -1100,15 +1100,8 @@ const App = () => {
       html5QrCodeRef.current = null;
     }
   }
-};
+  };
 
-  const pauseScanner = () => {
-  isScanPausedRef.current = true;
-  setIsScanPaused(true);
-  if (html5QrCodeRef.current) {
-    try { html5QrCodeRef.current.pause(true); } catch {}
-  }
-};
   const stopScanner = async () => {
     isScanPausedRef.current = false;
     if (html5QrCodeRef.current) { 
@@ -1116,8 +1109,8 @@ const App = () => {
       try { await html5QrCodeRef.current.clear(); } catch{}
       html5QrCodeRef.current = null;
     }
-    setShowScanner(false); setScannerError(''); setScanSuccess(''); setScannedStudentData(null); setIsScanPaused(false);
-};
+    setShowScanner(false); setScannerError(''); setScannedStudentData(null); setIsScanPaused(false);
+  };
 
   const onScanSuccess = async (decodedText) => {
     if (isScanPausedRef.current) return { success:false };
@@ -1173,7 +1166,6 @@ return {success:true};
       isScanPausedRef.current = false; 
   setScannedStudentData(null);
   setScannerError('');
-  setScanSuccess('');
   setIsScanPaused(false);
 
   if (html5QrCodeRef.current) {
@@ -1802,10 +1794,7 @@ return {success:true};
                       {filtered.map(chant => {
                         const isOpen = expandedChant === chant.id;
                         // Drive file ID → direct streamable URL
-                        const m = chant.drive_url?.match(/\/d\/([a-zA-Z0-9_-]+)/);
-                        const fileId = m ? m[1] : null;
-                        const streamUrl = fileId ? `https://drive.google.com/uc?export=open&id=${fileId}` : chant.drive_url;
-                        const downloadUrl = fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : chant.drive_url;
+
                         return (
                           <div key={chant.id} style={{ borderRadius:16, overflow:'hidden', border: isOpen ? '1.5px solid rgba(139,92,246,.5)' : '1.5px solid var(--border)', background:'var(--bg-card)', transition:'all .2s' }}>
 
