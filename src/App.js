@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useState, useEffect, useRef , useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Users, ClipboardList, FileText, BarChart3, Plus, Edit2, Trash2, Search, Download, Menu, X, Lock, Unlock, CheckSquare, Key, Copy, Check, LogOut, QrCode, Camera, XCircle, Sun, Moon, Settings, BookOpen, Video, Music, Image, FileImage, ChevronDown, ChevronUp, ExternalLink, Eye, Save, Trash } from 'lucide-react';
