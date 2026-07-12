@@ -1,0 +1,100 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  font-family: 'Cairo', sans-serif;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden; /* منع السكرول الأفقي */
+}
+
+/* تحسين النصوص على الموبايل */
+html {
+  font-size: 16px; /* حجم أساسي مناسب للموبايل */
+  -webkit-text-size-adjust: 100%; /* منع تكبير النص التلقائي في Safari */
+}
+
+/* Custom scrollbar للشاشات الكبيرة فقط */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #555;
+  }
+}
+
+/* إخفاء الـ scrollbar على الموبايل */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar {
+    width: 0px;
+    height: 0px;
+  }
+}
+
+/* تحسينات للموبايل */
+@media (max-width: 640px) {
+  /* تصغير حجم الخط قليلاً للشاشات الصغيرة جداً */
+  html {
+    font-size: 14px;
+  }
+}
+
+/* تحسين اللمس على الموبايل */
+button, 
+a, 
+input, 
+select, 
+textarea {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+  touch-action: manipulation; /* تحسين استجابة اللمس */
+}
+
+/* منع zoom عند focus على input في iOS */
+@media (max-width: 768px) {
+  input, 
+  select, 
+  textarea {
+    font-size: 16px !important; /* iOS يعمل zoom للـ inputs اللي أصغر من 16px */
+  }
+}
+
+/* تحسين الصور للموبايل */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Utility classes إضافية للموبايل */
+@layer utilities {
+  .touch-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
