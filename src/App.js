@@ -1,7 +1,7 @@
 /* eslint-disable */
 import React, { useState, useEffect, useRef , useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Users, ClipboardList, FileText, BarChart3, Plus, Edit2, Trash2, Search, Download, Menu, X, Lock, Unlock, Key, Copy, Check, LogOut, QrCode, Camera, XCircle, Sun, Moon, Settings, BookOpen, ChevronDown, Save } from 'lucide-react';
+import { Users, ClipboardList, FileText, BarChart3, Plus, Edit2, Trash2, Search, Download, Menu, X, Lock, Unlock, CheckSquare, Key, Copy, Check, LogOut, QrCode, Camera, XCircle, Sun, Moon, Settings, BookOpen, Video, Music, Image, FileImage, ChevronDown, ChevronUp, ExternalLink, Eye, Save, Trash } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import * as XLSX from 'xlsx';
 import { Html5Qrcode } from 'html5-qrcode';
@@ -624,7 +624,7 @@ const App = () => {
   const [showScanner, setShowScanner] = useState(false);
   const [selectedSession, setSelectedSession] = useState(1);
   const [scannerError, setScannerError] = useState('');
-  // scanSuccess removed
+  const [scanSuccess, setScanSuccess] = useState('');
   const [scannedStudentData, setScannedStudentData] = useState(null);
   const [showAbsentModal, setShowAbsentModal] = useState(false);
   const [selectedSessionAbsent, setSelectedSessionAbsent] = useState(null);
@@ -689,7 +689,7 @@ const App = () => {
   useEffect(() => {
     if (isLoggedIn) loadAllData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLoggedIn]);
 
   useEffect(() => {
     return () => { if (html5QrCodeRef.current) html5QrCodeRef.current.stop().catch(() => {}); };
@@ -863,6 +863,8 @@ const App = () => {
     if (m) return `https://www.youtube.com/embed/${m[1]}`;
     return url;
   };
+  // Helper: parse multi-line URLs
+  const parseUrls = (str) => str ? str.split(/[\n,]+/).map(u => u.trim()).filter(Boolean) : [];
   // Helper: Drive embed
   const driveEmbedUrl = (url) => {
     if (!url) return '';
@@ -916,9 +918,9 @@ const App = () => {
       toast('💾 تم الحفظ محلياً!', { icon: '✅' }); return;
     }
     try {
-      const { error } = await supabase.from('attendance')
-        .upsert({ student_id: studentId, sessions: updated }, { onConflict: 'student_id' });
-      if (error) throw error;
+      const { data: ex } = await supabase.from('attendance').select('id').eq('student_id', studentId).limit(1).maybeSingle();
+      if (ex) await supabase.from('attendance').update({ sessions: updated }).eq('student_id', studentId);
+      else await supabase.from('attendance').insert([{ student_id: studentId, sessions: updated }]);
     } catch { toast.error('خطأ في الحفظ!'); }
   };
 
@@ -930,9 +932,10 @@ const App = () => {
       for (const ch of pendingChanges) {
         try {
           if (ch.type === 'attendance') {
-            const { error } = await supabase.from('attendance')
-              .upsert({ student_id: ch.studentId, sessions: ch.sessions }, { onConflict: 'student_id' });
-            if (error) throw error;
+            const { data: ex, error: fe } = await supabase.from('attendance').select('id').eq('student_id', ch.studentId).limit(1).maybeSingle();
+            if (fe) throw fe;
+            if (ex) { const { error: ue } = await supabase.from('attendance').update({ sessions: ch.sessions }).eq('student_id', ch.studentId); if (ue) throw ue; }
+            else { const { error: ie } = await supabase.from('attendance').insert([{ student_id: ch.studentId, sessions: ch.sessions }]); if (ie) throw ie; }
             ok.push(ch); cnt++;
           }
         } catch { if (Date.now() - ch.timestamp < 7*24*60*60*1000) fail.push(ch); }
@@ -953,7 +956,8 @@ const App = () => {
       const cur = attendance[s.id] || Array(12).fill(false);
       const u = cur.map((v, i) => i === sessionIndex ? true : v);
       upd[s.id] = u;
-      ups.push(supabase.from('attendance').upsert({ student_id: s.id, sessions: u }, { onConflict: 'student_id' }));
+      const { data: ex } = await supabase.from('attendance').select('id').eq('student_id', s.id).limit(1).maybeSingle();
+      ups.push(ex ? supabase.from('attendance').update({ sessions: u }).eq('student_id', s.id) : supabase.from('attendance').insert([{ student_id: s.id, sessions: u }]));
     }
     setAttendance(prev => ({ ...prev, ...upd })); await Promise.all(ups);
   };
@@ -990,8 +994,7 @@ const App = () => {
       const base = ((att + mRaw + fRaw) / 110 * 100);
       return (base + mBonus + fBonus).toFixed(2);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exams, calcAtt]);
+  }, [attendance, exams, calcAtt]);
   const getGrade = (s) => {
     if (s >= 85) return { text:'ممتاز',    color:'var(--green)' };
     if (s >= 75) return { text:'جيد جداً', color:'var(--teal)' };
@@ -1067,7 +1070,7 @@ const App = () => {
 
   const startScanner = async () => {
      isScanPausedRef.current = false;
-  setScannerError(''); setScannedStudentData(null); setIsScanPaused(false); setShowScanner(true);
+  setScannerError(''); setScanSuccess(''); setScannedStudentData(null); setIsScanPaused(false); setShowScanner(true);
   try {
     await new Promise(r => setTimeout(r, 100));
 
@@ -1100,8 +1103,15 @@ const App = () => {
       html5QrCodeRef.current = null;
     }
   }
-  };
+};
 
+  const pauseScanner = () => {
+  isScanPausedRef.current = true;
+  setIsScanPaused(true);
+  if (html5QrCodeRef.current) {
+    try { html5QrCodeRef.current.pause(true); } catch {}
+  }
+};
   const stopScanner = async () => {
     isScanPausedRef.current = false;
     if (html5QrCodeRef.current) { 
@@ -1109,8 +1119,8 @@ const App = () => {
       try { await html5QrCodeRef.current.clear(); } catch{}
       html5QrCodeRef.current = null;
     }
-    setShowScanner(false); setScannerError(''); setScannedStudentData(null); setIsScanPaused(false);
-  };
+    setShowScanner(false); setScannerError(''); setScanSuccess(''); setScannedStudentData(null); setIsScanPaused(false);
+};
 
   const onScanSuccess = async (decodedText) => {
     if (isScanPausedRef.current) return { success:false };
@@ -1147,8 +1157,9 @@ setIsScanPaused(true);
       const cur = la?.sessions || Array(12).fill(false);
       if (cur[si]===true) { setScannedStudentData({success:false,message:'⚠️ مسجل من قبل!',studentName:student.name,session:selectedSession,type:'already_registered'}); toast.error(`⚠️ ${student.name} - مسجل!`,{duration:2000}); sessionStorage.removeItem(LOCK); return {success:false}; }
       const upd = cur.map((v,i) => i===si?true:v);
-      const { error: ue } = await supabase.from('attendance').upsert({ student_id: student.id, sessions: upd }, { onConflict: 'student_id' });
-      if (ue) throw new Error('فشل الحفظ');
+      const { data:ex } = await supabase.from('attendance').select('id').eq('student_id',student.id).maybeSingle();
+      if (ex) { const {error:ue}=await supabase.from('attendance').update({sessions:upd}).eq('student_id',student.id); if(ue) throw new Error('فشل التحديث'); }
+      else { const {error:ie}=await supabase.from('attendance').insert([{student_id:student.id,sessions:upd}]); if(ie) throw new Error('فشل الإضافة'); }
       setAttendance(prev=>({...prev,[student.id]:upd}));
       setScannedStudentData({success:true, message:'✅ تم تسجيل الحضور!', studentName:student.name, session:selectedSession, type:'success'});
 toast.success(`✅ ${student.name} - حاضر!`, {duration:2000});
@@ -1166,6 +1177,7 @@ return {success:true};
       isScanPausedRef.current = false; 
   setScannedStudentData(null);
   setScannerError('');
+  setScanSuccess('');
   setIsScanPaused(false);
 
   if (html5QrCodeRef.current) {
@@ -1311,7 +1323,7 @@ return {success:true};
 
               <button onClick={() => { setCurrentPage('public-lessons'); setStudentResult(null); setStudentCode(''); setResultError(''); }} className="btn btn-violet btn-xl anim-pulse" style={{ width:'100%', gap:10 }}>
                 <span style={{ fontSize:22 }}>🎓</span>
-                <span style={{ fontSize:16, fontWeight:900 }}>صفحة الطلاب</span>
+                <span style={{ fontSize:13, fontWeight:500 }}> طلاب مدرسة تين اويه انسوك </span>
                 <span style={{ fontSize:22 }}>⭐</span>
               </button>
               <p style={{ textAlign:'center', color:'var(--muted)', fontSize:11, marginTop:8 }}>الحصص والدرجات — للطلاب فقط 🚀</p>
@@ -1762,7 +1774,7 @@ return {success:true};
             {!showPublicGrades && (
               <div>
                 <div style={{ textAlign:'center', marginBottom:18 }}>
-                  <h1 style={{ fontSize:22, fontWeight:900, color:'var(--gold)', marginBottom:6 }}>🎵 ألحان المذاكرة</h1>
+                  <h1 style={{ fontSize:22, fontWeight:900, color:'var(--gold)', marginBottom:6 }}>🎵 ألحان </h1>
                   <p style={{ color:'var(--muted)', fontSize:13 }}>اضغط على اللحن عشان تسمعه</p>
                 </div>
 
@@ -1794,7 +1806,10 @@ return {success:true};
                       {filtered.map(chant => {
                         const isOpen = expandedChant === chant.id;
                         // Drive file ID → direct streamable URL
-
+                        const m = chant.drive_url?.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                        const fileId = m ? m[1] : null;
+                        const streamUrl = fileId ? `https://drive.google.com/uc?export=open&id=${fileId}` : chant.drive_url;
+                        const downloadUrl = fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : chant.drive_url;
                         return (
                           <div key={chant.id} style={{ borderRadius:16, overflow:'hidden', border: isOpen ? '1.5px solid rgba(139,92,246,.5)' : '1.5px solid var(--border)', background:'var(--bg-card)', transition:'all .2s' }}>
 
@@ -1835,12 +1850,12 @@ return {success:true};
                                     <button
                                       onClick={() => { const a = document.getElementById(`aud-${chant.id}`); if(a) a.currentTime = Math.max(0, a.currentTime - 3); }}
                                       style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 16px', borderRadius:99, border:'1px solid rgba(139,92,246,.25)', background:'rgba(139,92,246,.08)', color:'var(--violet)', cursor:'pointer', fontFamily:'Cairo,sans-serif', fontWeight:700, fontSize:13 }}>
-                                      ⏪ <span>3 ثواني</span>
+                                      ⏩ <span></span>
                                     </button>
                                     <button
                                       onClick={() => { const a = document.getElementById(`aud-${chant.id}`); if(a) a.currentTime = Math.min(a.duration||0, a.currentTime + 3); }}
                                       style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 16px', borderRadius:99, border:'1px solid rgba(139,92,246,.25)', background:'rgba(139,92,246,.08)', color:'var(--violet)', cursor:'pointer', fontFamily:'Cairo,sans-serif', fontWeight:700, fontSize:13 }}>
-                                      <span>3 ثواني</span> ⏩
+                                      <span></span> ⏪
                                     </button>
                                   </div>
                                 </div>
@@ -2134,7 +2149,7 @@ return {success:true};
                 )}
               </div>
             )}
-            <div style={{ marginTop:28, textAlign:'center' }}><p style={{ fontSize:11, color:'var(--muted)', opacity:.4 }}>Created by Ameen Mamdouh ☁️</p></div>
+            <div style={{ marginTop:28, textAlign:'center' }}><p style={{ fontSize:11, color:'var(--muted)', opacity:.4 }}> تين اويه انسوك☁️</p></div>
           </div>
         </div>
       </>
@@ -2397,7 +2412,7 @@ return {success:true};
                 onMouseLeave={e=>e.currentTarget.style.background='rgba(244,63,94,.07)'}>
                 <LogOut size={14}/> تسجيل الخروج
               </button>
-              <p style={{ textAlign:'center', color:'var(--muted)', opacity:.4, fontSize:9, marginTop:7 }}>Created by Ameen Mamdouh ☁️</p>
+              <p style={{ textAlign:'center', color:'var(--muted)', opacity:.4, fontSize:9, marginTop:7 }}>تين اويه انسوك☁️</p>
             </div>
           </aside>
 
@@ -2582,19 +2597,18 @@ return {success:true};
                   <button onClick={()=>setCurrentPage('qr-scanner')} className="btn btn-teal btn-sm"><Camera size={14}/> Scan QR</button>
                 </div>
 
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, marginBottom:16 }}>
-                  {Array.from({length:12},(_,i) => {
-                    const sn = i+1;
-                    const cnt = students.filter(s=>attendance[s.id]?.[i]).length;
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:16 }}>
+                  {[1,2,3].map(sn => {
+                    const cnt = students.filter(s=>attendance[s.id]?.[sn-1]).length;
                     const pct = students.length>0 ? cnt/students.length*100 : 0;
                     return (
-                      <div key={sn} className="glass" style={{ padding:'10px 12px' }}>
-                        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                          <span style={{ fontWeight:700, fontSize:11, color:'var(--text)' }}>ح{sn}</span>
-                          {lockedSessions[i] ? <Lock size={11} color="var(--rose)"/> : <Unlock size={11} color="var(--green)"/>}
+                      <div key={sn} className="glass" style={{ padding:'14px 14px' }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                          <span style={{ fontWeight:700, fontSize:12, color:'var(--text)' }}>ح{sn}</span>
+                          {lockedSessions[sn-1] ? <Lock size={13} color="var(--rose)"/> : <Unlock size={13} color="var(--green)"/>}
                         </div>
-                        <p style={{ fontSize:18, fontWeight:900, color:'var(--violet)' }}>{cnt}<span style={{ fontSize:10, color:'var(--muted)' }}>/{students.length}</span></p>
-                        <div className="prog-track" style={{ marginTop:5 }}><div className="prog-fill" style={{ width:`${pct}%`, background:'var(--violet)' }}/></div>
+                        <p style={{ fontSize:22, fontWeight:900, color:'var(--violet)' }}>{cnt}<span style={{ fontSize:11, color:'var(--muted)' }}>/{students.length}</span></p>
+                        <div className="prog-track" style={{ marginTop:7 }}><div className="prog-fill" style={{ width:`${pct}%`, background:'var(--violet)' }}/></div>
                       </div>
                     );
                   })}
@@ -2636,7 +2650,6 @@ return {success:true};
                       <tbody>
                         {filteredAttendanceStudents.map((s,idx) => {
                           const attended = attendance[s.id]?.filter(Boolean).length||0;
-                          const activeSessions = Array.from({length:12},(_,i)=>i).filter(i=>students.some(st=>attendance[st.id]?.[i])).length || 12;
                           return (
                             <tr key={s.id}>
                               <td style={{ color:'var(--muted)', fontWeight:700, position:'sticky', right:0, background:'var(--bg-card)', zIndex:1 }}>{idx+1}</td>
@@ -2646,7 +2659,7 @@ return {success:true};
                                   <input type="checkbox" className="chk" checked={attendance[s.id]?.[i]||false} onChange={()=>toggleAttendance(s.id,i)} disabled={lockedSessions[i]}/>
                                 </td>
                               ))}
-                              <td style={{ textAlign:'center', fontWeight:800, color:'var(--violet)', fontSize:12 }}>{attended}/{activeSessions}</td>
+                              <td style={{ textAlign:'center', fontWeight:800, color:'var(--violet)', fontSize:12 }}>{attended}/12</td>
                               <td style={{ textAlign:'center', fontWeight:900, color:'var(--gold)', fontSize:13 }}>{calcAtt(s.id)}</td>
                             </tr>
                           );
