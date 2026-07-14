@@ -817,6 +817,27 @@ const App = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // ── Secure public result fetch (uses RPC — DB only returns THIS student's data) ──
+  // Replaces the old direct table reads that exposed every student's data to anyone.
+  const fetchPublicStudentResultByCode = async (code) => {
+    const { data, error } = await supabase.rpc('get_student_public_result', { p_code: code.trim().toUpperCase() });
+    const row = Array.isArray(data) ? data[0] : data;
+    if (error || !row) return null;
+    const mRaw = (row.m_coptic||0)+(row.m_liturgy||0)+(row.m_oral||0);
+    const fRaw = (row.f_coptic||0)+(row.f_liturgy||0)+(row.f_oral||0);
+    const mBonus = row.m_bonus||0; const fBonus = row.f_bonus||0;
+    const attScore = parseFloat(row.attendance_score||0);
+    const base = ((attScore + mRaw + fRaw) / 110 * 100);
+    const tot = (base + mBonus + fBonus).toFixed(2);
+    return {
+      name: row.student_name, age: row.student_age,
+      attendance: attScore.toFixed(2), attendedCount: row.attended_count, totalSessions: row.total_sessions,
+      monthly: { coptic:row.m_coptic||0, liturgy:row.m_liturgy||0, oral:row.m_oral||0, bonus:mBonus, total:mRaw.toFixed(1) },
+      final:   { coptic:row.f_coptic||0, liturgy:row.f_liturgy||0, oral:row.f_oral||0, bonus:fBonus, total:fRaw.toFixed(1) },
+      total: tot, grade: getGrade(parseFloat(tot))
+    };
+  };
+
   // ── Public student search (for chants page) ──
   const searchPublicStudent = async () => {
     setPublicResultError('');
@@ -824,33 +845,9 @@ const App = () => {
     if (!publicStudentCode.trim()) { setPublicResultError('أدخل الكود'); return; }
     setPublicSearching(true);
     try {
-      const { data: sd, error: se } = await supabase.from('students').select('id, name, age, student_code').eq('student_code', publicStudentCode.trim().toUpperCase()).single();
-      if (se || !sd) { setPublicResultError('❌ الكود غير صحيح!'); setPublicSearching(false); return; }
-      const [allAtt, attRes, exRes] = await Promise.all([
-        supabase.from('attendance').select('sessions'),
-        supabase.from('attendance').select('sessions').eq('student_id', sd.id).maybeSingle(),
-        supabase.from('exams').select('*').eq('student_id', sd.id).maybeSingle()
-      ]);
-      let actualSessions = 0;
-      if (allAtt.data?.length > 0) {
-        for (let i = 0; i < 12; i++) { if (allAtt.data.some(r => Array.isArray(r.sessions) && r.sessions[i] === true)) actualSessions++; }
-      }
-      const sessions = attRes.data?.sessions || [];
-      const attended = Array.isArray(sessions) ? sessions.filter(Boolean).length : 0;
-      const total = actualSessions > 0 ? actualSessions : 12;
-      const attScore = ((attended / total) * 30).toFixed(2);
-      const ex = exRes.data || {};
-      const mRaw = (ex.m_coptic||0)+(ex.m_liturgy||0)+(ex.m_oral||0);
-      const fRaw = (ex.f_coptic||0)+(ex.f_liturgy||0)+(ex.f_oral||0);
-      const mBonus = ex.m_bonus||0; const fBonus = ex.f_bonus||0;
-      const base = ((parseFloat(attScore) + mRaw + fRaw) / 110 * 100);
-      const tot = (base + mBonus + fBonus).toFixed(2);
-      setPublicStudentResult({
-        name: sd.name, age: sd.age, attendance: attScore, attendedCount: attended, totalSessions: total,
-        monthly: { coptic:ex.m_coptic||0, liturgy:ex.m_liturgy||0, oral:ex.m_oral||0, bonus:mBonus, total:mRaw.toFixed(1) },
-        final:   { coptic:ex.f_coptic||0, liturgy:ex.f_liturgy||0, oral:ex.f_oral||0, bonus:fBonus, total:fRaw.toFixed(1) },
-        total: tot, grade: getGrade(parseFloat(tot))
-      });
+      const result = await fetchPublicStudentResultByCode(publicStudentCode);
+      if (!result) { setPublicResultError('❌ الكود غير صحيح!'); return; }
+      setPublicStudentResult(result);
       setShowPublicGrades(true);
     } catch { setPublicResultError('⚠️ حدث خطأ. حاول مرة أخرى'); }
     finally { setPublicSearching(false); }
@@ -1012,33 +1009,9 @@ const App = () => {
     setResultError(''); setStudentResult(null);
     if (!studentCode.trim()) { setResultError('أدخل الكود'); return; }
     try {
-      const { data: sd, error: se } = await supabase.from('students').select('id, name, age, student_code').eq('student_code', studentCode.trim().toUpperCase()).single();
-      if (se || !sd) { setResultError('❌ الكود غير صحيح!'); return; }
-      const [allAtt, attRes, exRes] = await Promise.all([
-        supabase.from('attendance').select('sessions'),
-        supabase.from('attendance').select('sessions').eq('student_id', sd.id).maybeSingle(),
-        supabase.from('exams').select('*').eq('student_id', sd.id).maybeSingle()
-      ]);
-      let actualSessions = 0;
-      if (allAtt.data?.length > 0) {
-        for (let i=0; i<12; i++) { if (allAtt.data.some(r => Array.isArray(r.sessions) && r.sessions[i]===true)) actualSessions++; }
-      }
-      const sessions = attRes.data?.sessions || [];
-      const attended = Array.isArray(sessions) ? sessions.filter(Boolean).length : 0;
-      const total = actualSessions > 0 ? actualSessions : 12;
-      const attScore = ((attended/total)*30).toFixed(2);
-      const ex = exRes.data || {};
-      const mRaw2 = (ex.m_coptic||0)+(ex.m_liturgy||0)+(ex.m_oral||0);
-      const fRaw2 = (ex.f_coptic||0)+(ex.f_liturgy||0)+(ex.f_oral||0);
-      const mB2 = ex.m_bonus||0; const fB2 = ex.f_bonus||0;
-      const base2 = ((parseFloat(attScore)+mRaw2+fRaw2)/110*100);
-      const tot = (base2+mB2+fB2).toFixed(2);
-      setStudentResult({
-        name:sd.name, age:sd.age, attendance:attScore, attendedCount:attended, totalSessions:total,
-        monthly:{ coptic:ex.m_coptic||0, liturgy:ex.m_liturgy||0, oral:ex.m_oral||0, bonus:mB2, total:mRaw2.toFixed(1) },
-        final:  { coptic:ex.f_coptic||0, liturgy:ex.f_liturgy||0, oral:ex.f_oral||0, bonus:fB2, total:fRaw2.toFixed(1) },
-        total:tot, grade:getGrade(parseFloat(tot))
-      });
+      const result = await fetchPublicStudentResultByCode(studentCode);
+      if (!result) { setResultError('❌ الكود غير صحيح!'); return; }
+      setStudentResult(result);
     } catch { setResultError('⚠️ حدث خطأ. حاول مرة أخرى'); }
   };
 
@@ -1131,7 +1104,8 @@ setIsScanPaused(true);
       const tid = toast.loading('⏳ جاري التحقق...');
       await stopScanner();
       try {
-        const { data:sd, error:se } = await supabase.from('students').select('id,name,student_code').eq('student_code',decodedText.trim().toUpperCase()).limit(1).single();
+        const { data:vData, error:se } = await supabase.rpc('verify_student_code', { p_code: decodedText.trim().toUpperCase() });
+        const sd = Array.isArray(vData) ? vData[0] : vData;
         if (se||!sd) { toast.error('الكود غير صحيح!', {id:tid}); setResultError('الكود غير صحيح!'); return {success:false}; }
         setScannedCode(decodedText); setStudentCode(decodedText);
         sessionStorage.setItem('tempStudentName', sd.name); setShowConfirmSearch(true);
@@ -1799,4 +1773,24 @@ return {success:true};
                   return filtered.length === 0 ? (
                     <div style={{ textAlign:'center', padding:'30px 0' }}>
                       <div style={{ fontSize:36, marginBottom:10 }}>🔍</div>
-  
+                      <p style={{ color:'var(--muted)', fontWeight:700 }}>مفيش نتائج لـ "{chantSearch}"</p>
+                    </div>
+                  ) : (
+                    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                      {filtered.map(chant => {
+                        const isOpen = expandedChant === chant.id;
+                        // Drive file ID → direct streamable URL
+                        const m = chant.drive_url?.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                        const fileId = m ? m[1] : null;
+                        const streamUrl = fileId ? `https://drive.google.com/uc?export=open&id=${fileId}` : chant.drive_url;
+                        const downloadUrl = fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : chant.drive_url;
+                        return (
+                          <div key={chant.id} style={{ borderRadius:16, overflow:'hidden', border: isOpen ? '1.5px solid rgba(139,92,246,.5)' : '1.5px solid var(--border)', background:'var(--bg-card)', transition:'all .2s' }}>
+
+                            {/* Header row */}
+                            <button onClick={() => setExpandedChant(isOpen ? null : chant.id)}
+                              style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background:'none', border:'none', cursor:'pointer', fontFamily:'Cairo,sans-serif', textAlign:'right' }}>
+                              <div style={{ width:44, height:44, borderRadius:13, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+                                background: isOpen ? 'linear-gradient(135deg,var(--violet),#7c3aed)' : 'linear-gradient(135deg,rgba(139,92,246,.12),var(--gold-glow))',
+                                border: isOpen ? 'none' : '1px solid var(--border-g)', transition:'all .25s',
+                                boxShadow: isOpen ? '0 4px 16px rgba(139,92,246,.35)' : 'non
