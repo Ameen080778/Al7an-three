@@ -2527,7 +2527,7 @@ return {success:true};
                               return (
                                 <div className="rank-badge" style={{ background:`${rs.color}1a`, border:`1px solid ${rs.color}55`, color: rs.color }}>
                                   <span className="rank-badge-emoji">{rs.emoji}</span>
-                                  المركز {rs.label} على الفرقة
+                                  المركز {rs.label} على المدرسة
                                 </div>
                               );
                             })()}
@@ -2625,7 +2625,7 @@ return {success:true};
 
                         <hr className="manuscript-rule" />
 
-                        <p className="manuscript-title">🎉 تهنئك لتفوقك 🎉</p>
+                        <p className="manuscript-title">🎉 تهنئك لنجاحك 🎉</p>
                         <p className="manuscript-body">
                           اجتزت السنة الأولى بنجاح، ودلوقتي هتبدأ معانا رحلة جديدة في السنة الثانية ✨
                         </p>
