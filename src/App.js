@@ -2363,7 +2363,7 @@ return {success:true};
                         {!showScanner && (
                           <button onClick={startScanner}
                             style={{ flexShrink:0, padding:'11px 20px', borderRadius:13, border:'none', cursor:'pointer', background:'linear-gradient(135deg,#0d9488,#2dd4bf)', color:'#fff', fontFamily:'Cairo,sans-serif', fontWeight:900, fontSize:14, display:'flex', alignItems:'center', gap:8, boxShadow:'0 5px 22px rgba(13,148,136,.3)' }}>
-                            <Camera size={17}/> ابدأ
+                            <Camera size={17}/> افتح الكاميرا للscan
                           </button>
                         )}
                       </div>
@@ -2527,7 +2527,7 @@ return {success:true};
                               return (
                                 <div className="rank-badge" style={{ background:`${rs.color}1a`, border:`1px solid ${rs.color}55`, color: rs.color }}>
                                   <span className="rank-badge-emoji">{rs.emoji}</span>
-                                  المركز {rs.label} على الفرقة
+                                  المركز {rs.label} على المدرسة
                                 </div>
                               );
                             })()}
@@ -2642,7 +2642,7 @@ return {success:true};
 
                         <hr className="manuscript-rule" />
 
-                        <p className="manuscript-title">🎉 تهنئك لتفوقك 🎉</p>
+                        <p className="manuscript-title">🎉 تهنئك لنجاحك 🎉</p>
                         <p className="manuscript-body">
                           اجتزت السنة الأولى بنجاح، ودلوقتي هتبدأ معانا رحلة جديدة في السنة الثانية ✨
                         </p>
