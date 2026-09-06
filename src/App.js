@@ -2363,7 +2363,7 @@ return {success:true};
                         {!showScanner && (
                           <button onClick={startScanner}
                             style={{ flexShrink:0, padding:'11px 20px', borderRadius:13, border:'none', cursor:'pointer', background:'linear-gradient(135deg,#0d9488,#2dd4bf)', color:'#fff', fontFamily:'Cairo,sans-serif', fontWeight:900, fontSize:14, display:'flex', alignItems:'center', gap:8, boxShadow:'0 5px 22px rgba(13,148,136,.3)' }}>
-                            <Camera size={17}/> افتح الكاميرا للscan
+                            <Camera size={17}/> ابدا Scan
                           </button>
                         )}
                       </div>
