@@ -937,7 +937,17 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingChanges, setPendingChanges] = useState([]);
-  const [lockedSessions, setLockedSessions] = useState(Array(12).fill(true));
+  const [lockedSessions, setLockedSessions] = useState([]);
+  const [currentTerm, setCurrentTerm] = useState(null); // { id, academic_year, term_number, has_monthly, session_count, status }
+  const [showEndTermConfirm, setShowEndTermConfirm] = useState(false);
+  const [endTermPassword, setEndTermPassword] = useState('');
+  const [isEndingTerm, setIsEndingTerm] = useState(false);
+  const [isAddingSession, setIsAddingSession] = useState(false);
+  const [allTerms, setAllTerms] = useState([]); // كل ترمات السنة الدراسية الحالية (لتقرير السنة ولمحول الترمات)
+  const [yearlyData, setYearlyData] = useState({}); // { [studentId]: { [termId]: {...} } }
+  const [loadingYearly, setLoadingYearly] = useState(false);
+  const [selectedYearlyStudent, setSelectedYearlyStudent] = useState(null);
+  const [viewingTermId, setViewingTermId] = useState(null); // null = بتشوف/تعدل في الترم النشط، أو رقم ترم مؤرشف بتعدل فيه
   const [copiedCode, setCopiedCode] = useState(null);
   const [studentCode, setStudentCode] = useState('');
   const [studentResult, setStudentResult] = useState(null);
@@ -1087,6 +1097,106 @@ const App = () => {
     return () => { audioContext.close(); };
   }, []);
 
+  // الترم اللي بتشتغل عليه دلوقتي فعليًا: النشط، أو ترم مؤرشف لو مختاره من محول الترمات
+  const effectiveTerm = viewingTermId ? (allTerms.find(t => t.id === viewingTermId) || currentTerm) : currentTerm;
+  const isViewingArchived = !!(viewingTermId && currentTerm && viewingTermId !== currentTerm.id);
+
+  // عدد حصص الترم اللي بتشتغل عليه دلوقتي (بيكبر أوتوماتيك مع كل ضغطة "إضافة حصة")
+  const sessionCount = effectiveTerm?.session_count || 0;
+  const emptySessions = () => Array(sessionCount).fill(false);
+
+  // لما عدد الحصص يتغيّر، نظبط طول lockedSessions بنفس القياس
+  // (الحصص القديمة تفضل زي ما هي مقفولة/مفتوحة، والحصة الجديدة تتفتح تلقائي)
+  useEffect(() => {
+    setLockedSessions(prev => {
+      const next = Array(sessionCount).fill(false);
+      for (let i = 0; i < Math.min(prev.length, sessionCount); i++) next[i] = prev[i];
+      return next;
+    });
+  }, [sessionCount]);
+
+  // تحميل تقرير السنة كاملة (كل الترمات المتاحة للسنة الدراسية الحالية)
+  const loadYearlyReport = async () => {
+    if (!currentTerm?.academic_year) return;
+    setLoadingYearly(true);
+    try {
+      const { data: termsData } = await supabase.from('terms').select('*').eq('academic_year', currentTerm.academic_year).order('term_number');
+      setAllTerms(termsData || []);
+      const termIds = (termsData||[]).map(t=>t.id);
+      if (termIds.length === 0) { setYearlyData({}); return; }
+
+      const [{ data: attData }, { data: examData }] = await Promise.all([
+        supabase.from('attendance').select('*').in('term_id', termIds),
+        supabase.from('exams').select('*').in('term_id', termIds),
+      ]);
+
+      // عدد الحصص "المنعقدة فعلاً" لكل ترم لوحده (نفس منطق actualSessionsCount)
+      const heldByTerm = {};
+      termIds.forEach(tid => {
+        const term = termsData.find(t=>t.id===tid);
+        const sc = term?.session_count || 0;
+        const rows = (attData||[]).filter(a=>a.term_id===tid);
+        let held = 0;
+        for (let i=0;i<sc;i++){ if (rows.some(r=>r.sessions?.[i]===true)) held++; }
+        heldByTerm[tid] = held > 0 ? held : (sc||1);
+      });
+
+      const data = {};
+      students.forEach(s => {
+        data[s.id] = {};
+        termIds.forEach(tid => {
+          const term = termsData.find(t=>t.id===tid);
+          const attRow = (attData||[]).find(a=>a.student_id===s.id && a.term_id===tid);
+          const examRow = (examData||[]).find(e=>e.student_id===s.id && e.term_id===tid);
+          const sessions = attRow?.sessions || [];
+          const held = heldByTerm[tid];
+          let attended = 0;
+          for (let i=0;i<held;i++){ if (sessions[i]===true) attended++; }
+          const attScore = held>0 ? (attended/held*30) : 0;
+          const m = { coptic:examRow?.m_coptic||0, liturgy:examRow?.m_liturgy||0, oral:examRow?.m_oral||0, bonus:examRow?.m_bonus||0 };
+          const f = { coptic:examRow?.f_coptic||0, oral:examRow?.f_oral||0, bonus:examRow?.f_bonus||0 };
+          const mRaw = m.coptic+m.liturgy+m.oral;
+          const fRaw = f.coptic+f.oral;
+          let total;
+          if (term.has_monthly === false) {
+            total = (((attScore + fRaw) / 65) * 100) + f.bonus;
+          } else {
+            total = (((attScore + mRaw + fRaw) / 95) * 100) + m.bonus + f.bonus;
+          }
+          data[s.id][tid] = {
+            attendance: attScore.toFixed(2), attendedCount: attended, heldCount: held,
+            monthly:m, final:f, hasMonthly: term.has_monthly !== false,
+            total: total.toFixed(2),
+          };
+        });
+      });
+      setYearlyData(data);
+    } catch { toast.error('خطأ في تحميل التقرير السنوي!'); }
+    finally { setLoadingYearly(false); }
+  };
+
+  const exportYearlyReportToExcel = () => {
+    const rows = students.map((s,i) => {
+      const row = { '#': i+1, 'الاسم': s.name, 'الكود': s.student_code||'-' };
+      let sum=0, count=0;
+      allTerms.forEach(t => {
+        const d = yearlyData[s.id]?.[t.id];
+        row[`ترم ${t.term_number}`] = d ? d.total : '-';
+        if (d) { sum += parseFloat(d.total); count++; }
+      });
+      row['المتوسط السنوي'] = count>0 ? (sum/count).toFixed(2) : '-';
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'التقرير السنوي');
+    XLSX.writeFile(wb, `التقرير_السنوي_${currentTerm?.academic_year||''}.xlsx`);
+    toast.success('تم التصدير! 📑');
+  };
+
+  useEffect(() => {
+    if (currentPage === 'yearly-report' && isLoggedIn) loadYearlyReport();
+  }, [currentPage, isLoggedIn, currentTerm]);
+
   // ── Core logic ────────────────────────────────
   const checkLoginStatus = () => {
     const savedUser = localStorage.getItem('currentUser');
@@ -1110,28 +1220,93 @@ const App = () => {
 
   const handleLogout = () => { setIsLoggedIn(false); setCurrentUser(null); localStorage.removeItem('currentUser'); setCurrentPage('dashboard'); };
 
+  const loadCurrentTerm = async () => {
+    const { data: settings } = await supabase.from('app_settings').select('current_term_id').maybeSingle();
+    if (!settings?.current_term_id) { setCurrentTerm(null); return null; }
+    const { data: term } = await supabase.from('terms').select('*').eq('id', settings.current_term_id).maybeSingle();
+    setCurrentTerm(term || null);
+    return term || null;
+  };
+
+  // قائمة كل ترمات السنة الدراسية (نشط + مؤرشف) — عشان محول الترمات
+  const loadTermsList = async (academicYear) => {
+    if (!academicYear) return;
+    const { data } = await supabase.from('terms').select('*').eq('academic_year', academicYear).order('term_number');
+    setAllTerms(data || []);
+  };
+
   const loadAllData = async () => {
     setLoading(true);
-    try { await Promise.all([loadStudents(), loadAttendance(), loadExams(), loadChants()]); }
+    try {
+      const term = await loadCurrentTerm();
+      setViewingTermId(null); // نرجع نعرض الترم النشط دايمًا بعد أي تحديث كامل للبيانات
+      await Promise.all([loadStudents(), loadAttendance(term?.id), loadExams(term?.id), loadChants(), loadTermsList(term?.academic_year)]);
+    }
     catch { toast.error('خطأ في تحميل البيانات!'); }
     finally { setLoading(false); }
   };
 
   const loadStudents = async () => { const { data } = await supabase.from('students').select('*').order('id'); setStudents(data || []); };
-  const loadAttendance = async () => {
-    const { data } = await supabase.from('attendance').select('*');
-    const map = {}; data?.forEach(item => { map[item.student_id] = item.sessions || Array(12).fill(false); }); setAttendance(map);
+  const loadAttendance = async (termId) => {
+    const tId = termId || effectiveTerm?.id;
+    if (!tId) { setAttendance({}); return; }
+    const { data } = await supabase.from('attendance').select('*').eq('term_id', tId);
+    const map = {}; data?.forEach(item => { map[item.student_id] = item.sessions || []; }); setAttendance(map);
   };
-  const loadExams = async () => {
-    const { data } = await supabase.from('exams').select('*');
+  const loadExams = async (termId) => {
+    const tId = termId || effectiveTerm?.id;
+    if (!tId) { setExams({}); return; }
+    const { data } = await supabase.from('exams').select('*').eq('term_id', tId);
     const map = {};
     data?.forEach(row => {
       map[row.student_id] = {
         monthly: { coptic: row.m_coptic||0, liturgy: row.m_liturgy||0, oral: row.m_oral||0, bonus: row.m_bonus||0 },
-        final:   { coptic: row.f_coptic||0, oral: row.f_oral||0, bonus: row.f_bonus||0 },
+        final:   { coptic: row.f_coptic||0, liturgy: row.f_liturgy||0, oral: row.f_oral||0, bonus: row.f_bonus||0 },
       };
     });
     setExams(map);
+  };
+
+  // إضافة حصة جديدة للترم النشط
+  const addSession = async () => {
+    if (isAddingSession) return;
+    setIsAddingSession(true);
+    const tid = toast.loading('جاري إضافة حصة جديدة...');
+    try {
+      const { data, error } = await supabase.rpc('add_session');
+      if (error) throw error;
+      setCurrentTerm(prev => prev ? { ...prev, session_count: data } : prev);
+      setAllTerms(prev => prev.map(t => t.id === currentTerm?.id ? { ...t, session_count: data } : t));
+      await loadAttendance();
+      toast.success(`تمت إضافة الحصة رقم ${data}! ✅`, { id: tid });
+    } catch { toast.error('حدث خطأ أثناء إضافة الحصة!', { id: tid }); }
+    finally { setIsAddingSession(false); }
+  };
+
+  // إنهاء الترم النشط والانتقال للترم اللي بعده (محمي بباسورد)
+  const endTerm = async () => {
+    if (endTermPassword !== '123') { toast.error('الباسورد غلط!'); return; }
+    setIsEndingTerm(true);
+    const tid = toast.loading('جاري إنهاء الترم...');
+    try {
+      const { error } = await supabase.rpc('end_term_and_advance');
+      if (error) throw error;
+      setShowEndTermConfirm(false); setEndTermPassword('');
+      toast.success('تم إنهاء الترم وبدء الترم الجديد! 🎉', { id: tid, duration: 3000 });
+      await loadAllData();
+    } catch (err) {
+      toast.error(err.message || 'حدث خطأ أثناء إنهاء الترم!', { id: tid, duration: 4000 });
+    } finally { setIsEndingTerm(false); }
+  };
+
+  // التنقل بين الترمات (عرض/تعديل ترم مؤرشف، أو الرجوع للترم النشط)
+  const switchViewingTerm = async (termId) => {
+    const tid = toast.loading('جاري تحميل بيانات الترم...');
+    try {
+      setViewingTermId(termId);
+      await Promise.all([loadAttendance(termId), loadExams(termId)]);
+      toast.success('تم!', { id: tid, duration: 1200 });
+    } catch { toast.error('خطأ في تحميل الترم!', { id: tid }); }
   };
 
   // ── Chants CRUD ───────────────────────────────
@@ -1217,8 +1392,15 @@ const App = () => {
     const fRaw = (row.f_coptic||0)+(row.f_oral||0);
     const mBonus = row.m_bonus||0; const fBonus = row.f_bonus||0;
     const attScore = parseFloat(row.attendance_score||0);
-    const base = ((attScore + mRaw + fRaw) / 95 * 100);
-    const tot = (base + mBonus + fBonus).toFixed(2);
+    let tot;
+    if (row.has_monthly === false) {
+      // ترم من غير شهري: (حضور30 + فاينال35) ÷ 65 × 100 + بونص الفاينال
+      const base = ((attScore + fRaw) / 65 * 100);
+      tot = (base + fBonus).toFixed(2);
+    } else {
+      const base = ((attScore + mRaw + fRaw) / 95 * 100);
+      tot = (base + mBonus + fBonus).toFixed(2);
+    }
 
     // الترتيب: الدالة برجّع صف واحد بس لو الطالب من ضمن أول 10، وإلا مترجعش حاجة (rank يفضل null)
     let rank = null;
@@ -1230,6 +1412,7 @@ const App = () => {
 
     return {
       name: row.student_name, age: row.student_age,
+      hasMonthly: row.has_monthly !== false, termNumber: row.term_number, academicYear: row.academic_year,
       attendance: attScore.toFixed(2), attendedCount: row.attended_count, totalSessions: row.total_sessions,
       monthly: { coptic:row.m_coptic||0, liturgy:row.m_liturgy||0, oral:row.m_oral||0, bonus:mBonus, total:mRaw.toFixed(1) },
       final:   { coptic:row.f_coptic||0, oral:row.f_oral||0, bonus:fBonus, total:fRaw.toFixed(1) },
@@ -1306,14 +1489,14 @@ const App = () => {
     if (lockedSessions[sessionIndex]) return;
     const key = `${studentId}-${sessionIndex}`;
     if (attendanceSyncingRef.current.has(key)) return; // في نداء شغال بالفعل لنفس الطالب/الحصة
-    const current = attendance[studentId] || Array(12).fill(false);
+    const current = attendance[studentId] || emptySessions();
     const newValue = !current[sessionIndex];
     setAttendance(prev => {
-      const c = prev[studentId] || Array(12).fill(false);
+      const c = prev[studentId] || emptySessions();
       return { ...prev, [studentId]: c.map((v, i) => i === sessionIndex ? newValue : v) };
     });
     if (isOffline) {
-      const change = { type:'attendance', studentId, sessionIndex, value: newValue, timestamp: Date.now() };
+      const change = { type:'attendance', studentId, sessionIndex, value: newValue, termId: effectiveTerm?.id, timestamp: Date.now() };
       const np = [...pendingChanges, change]; setPendingChanges(np);
       localStorage.setItem('pendingAttendance', JSON.stringify(np));
       toast('💾 تم الحفظ محلياً!', { icon: '✅' }); return;
@@ -1321,10 +1504,10 @@ const App = () => {
     attendanceSyncingRef.current.add(key);
     try {
       // نجيب أحدث نسخة من قاعدة البيانات قبل ما نكتب، عشان منمسحش تسجيل حضور حصل من جهاز تاني في نفس الوقت
-      const { data: fresh } = await supabase.from('attendance').select('sessions').eq('student_id', studentId).maybeSingle();
-      const freshSessions = fresh?.sessions || Array(12).fill(false);
+      const { data: fresh } = await supabase.from('attendance').select('sessions').eq('student_id', studentId).eq('term_id', effectiveTerm?.id).maybeSingle();
+      const freshSessions = fresh?.sessions || emptySessions();
       const merged = freshSessions.map((v, i) => i === sessionIndex ? newValue : v);
-      const { error } = await supabase.from('attendance').upsert({ student_id: studentId, sessions: merged }, { onConflict: 'student_id' });
+      const { error } = await supabase.from('attendance').upsert({ student_id: studentId, term_id: effectiveTerm?.id, sessions: merged }, { onConflict: 'student_id,term_id' });
       if (error) throw error;
       setAttendance(prev => ({ ...prev, [studentId]: merged }));
     } catch { toast.error('خطأ في الحفظ!'); }
@@ -1346,15 +1529,17 @@ const App = () => {
       }
       for (const studentId of Object.keys(byStudent)) {
         const changes = byStudent[studentId];
+        // التغييرات اللي حصلت أوفلاين بتحمل term_id بتاع وقتها؛ لو الترم اتغيّر (انتهى) قبل المزامنة، نكتب لنفس الترم اللي كانت فيه
+        const changeTermId = changes.find(c => c.termId)?.termId || effectiveTerm?.id;
         try {
-          const { data: fresh, error: fe } = await supabase.from('attendance').select('sessions').eq('student_id', studentId).maybeSingle();
+          const { data: fresh, error: fe } = await supabase.from('attendance').select('sessions').eq('student_id', studentId).eq('term_id', changeTermId).maybeSingle();
           if (fe) throw fe;
-          let merged = fresh?.sessions || Array(12).fill(false);
+          let merged = fresh?.sessions || emptySessions();
           changes.forEach(ch => {
             if (ch.sessionIndex !== undefined) merged = merged.map((v, i) => i === ch.sessionIndex ? ch.value : v);
             else if (Array.isArray(ch.sessions)) merged = ch.sessions; // توافق مع تغييرات قديمة محفوظة قبل التحديث
           });
-          const { error: ue } = await supabase.from('attendance').upsert({ student_id: studentId, sessions: merged }, { onConflict: 'student_id' });
+          const { error: ue } = await supabase.from('attendance').upsert({ student_id: studentId, term_id: changeTermId, sessions: merged }, { onConflict: 'student_id,term_id' });
           if (ue) throw ue;
           cnt += changes.length;
         } catch { changes.forEach(ch => { if (Date.now() - ch.timestamp < 7*24*60*60*1000) fail.push(ch); }); }
@@ -1374,10 +1559,10 @@ const App = () => {
     try {
       const results = await Promise.all(students.map(async (s) => {
         // نجيب أحدث نسخة قبل الكتابة عشان منمسحش تسجيل حصل من جهاز تاني
-        const { data: fresh } = await supabase.from('attendance').select('sessions').eq('student_id', s.id).maybeSingle();
-        const freshSessions = fresh?.sessions || Array(12).fill(false);
+        const { data: fresh } = await supabase.from('attendance').select('sessions').eq('student_id', s.id).eq('term_id', effectiveTerm?.id).maybeSingle();
+        const freshSessions = fresh?.sessions || emptySessions();
         const merged = freshSessions.map((v, i) => i === sessionIndex ? true : v);
-        const { error } = await supabase.from('attendance').upsert({ student_id: s.id, sessions: merged }, { onConflict: 'student_id' });
+        const { error } = await supabase.from('attendance').upsert({ student_id: s.id, term_id: effectiveTerm?.id, sessions: merged }, { onConflict: 'student_id,term_id' });
         if (error) throw error;
         return { id: s.id, sessions: merged };
       }));
@@ -1405,7 +1590,7 @@ const App = () => {
     if (examSaveTimers.current[timerKey]) clearTimeout(examSaveTimers.current[timerKey]);
     examSaveTimers.current[timerKey] = setTimeout(async () => {
       const { error } = await supabase.from('exams')
-        .upsert({ student_id: studentId, [col]: parseFloat(value)||0 }, { onConflict: 'student_id' });
+        .upsert({ student_id: studentId, term_id: effectiveTerm?.id, [col]: parseFloat(value)||0 }, { onConflict: 'student_id,term_id' });
       if (error) toast.error('خطأ في الحفظ!');
       delete examSaveTimers.current[timerKey];
     }, 500);
@@ -1415,16 +1600,17 @@ const App = () => {
   const actualSessionsCount = useMemo(() => {
     const rows = Object.values(attendance);
     let count = 0;
-    for (let i=0; i<12; i++) { if (rows.some(s => Array.isArray(s) && s[i]===true)) count++; }
-    return count > 0 ? count : 12;
-  }, [attendance]);
+    for (let i=0; i<sessionCount; i++) { if (rows.some(s => Array.isArray(s) && s[i]===true)) count++; }
+    return count > 0 ? count : (sessionCount || 1);
+  }, [attendance, sessionCount]);
 
   const calcAtt = useMemo(() => {
+    const attWeight = effectiveTerm?.has_monthly === false ? 50 : 30; // 50 في الترم من غير شهري، 30 في الترم العادي
     return (sid) => {
       const a = attendance[sid]?.filter(Boolean).length||0;
-      return ((a/actualSessionsCount)*30).toFixed(2);
+      return ((a/actualSessionsCount)*attWeight).toFixed(2);
     };
-  }, [attendance, actualSessionsCount]);
+  }, [attendance, actualSessionsCount, effectiveTerm]);
 
   const calcTotal = useMemo(() => {
     return (sid) => {
@@ -1432,14 +1618,19 @@ const App = () => {
       const m  = exams[sid]?.monthly || {};
       const f  = exams[sid]?.final   || {};
       const mRaw = (m.coptic||0)+(m.liturgy||0)+(m.oral||0);
-      const fRaw = (f.coptic||0)+(f.oral||0);
       const mBonus = m.bonus||0;
       const fBonus = f.bonus||0;
+      if (effectiveTerm?.has_monthly === false) {
+        // ترم من غير امتحان شهري: حضور50 + فاينال50 (قبطي15+طقس15+تسميع20) = 100 مباشرة + بونص
+        const fRaw = (f.coptic||0)+(f.liturgy||0)+(f.oral||0);
+        return (att + fRaw + fBonus).toFixed(2);
+      }
+      const fRaw = (f.coptic||0)+(f.oral||0);
       // تحويل: (حضور30 + شهر30 + فاينال35) ÷ 95 × 100 + بونص
       const base = ((att + mRaw + fRaw) / 95 * 100);
       return (base + mBonus + fBonus).toFixed(2);
     };
-  }, [attendance, exams, calcAtt]);
+  }, [attendance, exams, calcAtt, effectiveTerm]);
   const getGrade = (s) => {
     if (s >= 85) return { text:'ممتاز',    color:'var(--green)' };
     if (s >= 75) return { text:'جيد جداً', color:'var(--teal)' };
@@ -1574,11 +1765,11 @@ setIsScanPaused(true);
     const si = selectedSession-1;
     if (lockedSessions[si]) { setScannedStudentData({success:false,message:'🔒 الحصة مقفولة!',studentName:student.name,type:'locked'}); toast.error('🔒 الحصة مقفولة!'); sessionStorage.removeItem(LOCK); return {success:false}; }
     try {
-      const { data:st, error:me } = await supabase.rpc('mark_attendance', { p_student_id: student.id, p_session_index: si });
+      const { data:st, error:me } = await supabase.rpc('mark_attendance', { p_student_id: student.id, p_session_index: si, p_term_id: currentTerm?.id });
       const status = Array.isArray(st) ? st[0] : st;
       if (me) throw new Error('فشل التحديث');
       if (status === 'already_registered') { setScannedStudentData({success:false,message:'⚠️ مسجل من قبل!',studentName:student.name,session:selectedSession,type:'already_registered'}); toast.error(`⚠️ ${student.name} - مسجل!`,{duration:2000}); sessionStorage.removeItem(LOCK); return {success:false}; }
-      setAttendance(prev=>{ const c=prev[student.id]||Array(12).fill(false); return {...prev,[student.id]:c.map((v,i)=>i===si?true:v)}; });
+      setAttendance(prev=>{ const c=prev[student.id]||emptySessions(); return {...prev,[student.id]:c.map((v,i)=>i===si?true:v)}; });
       setScannedStudentData({success:true, message:'✅ تم تسجيل الحضور!', studentName:student.name, session:selectedSession, type:'success'});
 toast.success(`✅ ${student.name} - حاضر!`, {duration:2000});
 if (successAudioRef.current) { try { successAudioRef.current.play(); } catch{} }
@@ -1666,7 +1857,7 @@ return {success:true};
     const l=document.createElement('a'); l.href=URL.createObjectURL(blob); l.download='نتائج_الطلاب.csv'; l.click();
   };
 
-  const examConfigs = [
+  const allExamConfigs = [
     { type:'monthly', title:'امتحان الشهر', color:'#3b82f6',
       fields:[
         { key:'coptic',  label:'قبطي',   max:10 },
@@ -1681,7 +1872,19 @@ return {success:true};
         { key:'bonus',   label:'بونص 🎁', max:null },
       ], total:35 },
   ];
-  const examCfg = examConfigs.find(e => e.type===currentExam);
+  // فاينال الترم من غير شهري (زي الترم التالت): قبطي15 + طقس15 + تسميع20 = 50
+  const finalNoMonthlyConfig = { type:'final', title:'امتحان الفاينال', color:'#f43f5e',
+    fields:[
+      { key:'coptic',  label:'قبطي',   max:15 },
+      { key:'liturgy', label:'طقس',    max:15 },
+      { key:'oral',    label:'تسميع',  max:20 },
+      { key:'bonus',   label:'بونص 🎁', max:null },
+    ], total:50 };
+  // الترم من غير شهري (زي الترم التالت) → تاب الشهري يتخفي، والفاينال بتوزيع مختلف
+  const examConfigs = effectiveTerm?.has_monthly === false
+    ? [finalNoMonthlyConfig]
+    : allExamConfigs;
+  const examCfg = examConfigs.find(e => e.type===currentExam) || examConfigs[0];
 
   const navItems = [
     { id:'dashboard',     icon:BarChart3,    label:'الإحصائيات', emoji:'📊' },
@@ -1691,6 +1894,7 @@ return {success:true};
     { id:'exams',        icon:FileText,     label:'الامتحانات',  emoji:'📝' },
     { id:'lessons',      icon:BookOpen,     label:'الألحان',      emoji:'🎵' },
     { id:'results',      icon:BarChart3,    label:'النتائج',     emoji:'🏆' },
+    { id:'yearly-report',icon:FileText,     label:'التقرير السنوي', emoji:'📅' },
     { id:'student-check',icon:Key,          label:'استعلام',     emoji:'🔍' },
   ];
 
@@ -2065,21 +2269,24 @@ return {success:true};
                     </div>
                     <div>
                       <span style={{ fontSize:24, fontWeight:900, color:'var(--teal)' }}>{studentResult.attendance}</span>
-                      <span style={{ fontSize:12, color:'var(--muted)' }}>/30</span>
+                      <span style={{ fontSize:12, color:'var(--muted)' }}>/{studentResult.hasMonthly===false?50:30}</span>
                     </div>
                   </div>
                   <div style={{ height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
-                    <div style={{ height:'100%', borderRadius:99, background:'linear-gradient(90deg,var(--teal),#2dd4bf)', width:`${Math.min(100,parseFloat(studentResult.attendance)/30*100)}%`, transition:'width 1.2s cubic-bezier(.16,1,.3,1)' }}/>
+                    <div style={{ height:'100%', borderRadius:99, background:'linear-gradient(90deg,var(--teal),#2dd4bf)', width:`${Math.min(100,parseFloat(studentResult.attendance)/(studentResult.hasMonthly===false?50:30)*100)}%`, transition:'width 1.2s cubic-bezier(.16,1,.3,1)' }}/>
                   </div>
                 </div>
 
                 {/* Exam rows */}
-                {[
+                {(studentResult.hasMonthly === false ? [
+                  { label:'الامتحان النهائي', icon:'🏆', data:studentResult.final, max:50, color:'var(--rose)', bg:'rgba(244,63,94,.06)', border:'rgba(244,63,94,.15)', d:'.08s', showBreakdown:true,
+                    subs:[{l:'قبطي',k:'coptic',m:15},{l:'طقس',k:'liturgy',m:15},{l:'تسميع',k:'oral',m:20}] },
+                ] : [
                   { label:'امتحان الشهر', icon:'📝', data:studentResult.monthly, max:30, color:'#3b82f6', bg:'rgba(59,130,246,.06)', border:'rgba(59,130,246,.15)', d:'.08s', showBreakdown:false,
                     subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
                   { label:'الامتحان النهائي', icon:'🏆', data:studentResult.final, max:35, color:'var(--rose)', bg:'rgba(244,63,94,.06)', border:'rgba(244,63,94,.15)', d:'.16s', showBreakdown:true,
                     subs:[{l:'قبطي',k:'coptic',m:15},{l:'تسميع',k:'oral',m:20}] },
-                ].map((exam, ei) => {
+                ]).map((exam, ei) => {
                   const data = exam.data || {};
                   const baseScore = (exam.subs||[]).reduce((sum,sub)=>sum+(parseFloat(data[sub.k])||0),0);
                   const bonus = parseFloat(data.bonus||0);
@@ -2561,19 +2768,22 @@ return {success:true};
                                 <p style={{ color:'var(--muted)', fontSize:10.5 }}>حضرت {publicStudentResult.attendedCount} من {publicStudentResult.totalSessions} حصة</p>
                               </div>
                             </div>
-                            <div><span style={{ fontFamily:"'Aref Ruqaa','Cairo',serif", fontSize:20, fontWeight:700, color:'var(--teal)' }}>{publicStudentResult.attendance}</span><span style={{ fontSize:11, color:'var(--muted)' }}>/30</span></div>
+                            <div><span style={{ fontFamily:"'Aref Ruqaa','Cairo',serif", fontSize:20, fontWeight:700, color:'var(--teal)' }}>{publicStudentResult.attendance}</span><span style={{ fontSize:11, color:'var(--muted)' }}>/{publicStudentResult.hasMonthly===false?50:30}</span></div>
                           </div>
                           <div style={{ height:4, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
-                            <div style={{ height:'100%', borderRadius:99, background:'var(--teal)', width:`${Math.min(100,parseFloat(publicStudentResult.attendance)/30*100)}%`, transition:'width 1.2s cubic-bezier(.16,1,.3,1)' }}/>
+                            <div style={{ height:'100%', borderRadius:99, background:'var(--teal)', width:`${Math.min(100,parseFloat(publicStudentResult.attendance)/(publicStudentResult.hasMonthly===false?50:30)*100)}%`, transition:'width 1.2s cubic-bezier(.16,1,.3,1)' }}/>
                           </div>
                         </div>
 
-                        {[
+                        {(publicStudentResult.hasMonthly === false ? [
+                          { label:'الامتحان النهائي', icon:'🏆', data:publicStudentResult.final, max:50, color:'var(--rose)', showBreakdown:true,
+                            subs:[{l:'قبطي',k:'coptic',m:15},{l:'طقس',k:'liturgy',m:15},{l:'تسميع',k:'oral',m:20}] },
+                        ] : [
                           { label:'امتحان الشهر', icon:'📝', data:publicStudentResult.monthly, max:30, color:'#3b82f6', showBreakdown:false,
                             subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
                           { label:'الامتحان النهائي', icon:'🏆', data:publicStudentResult.final, max:35, color:'var(--rose)', showBreakdown:true,
                             subs:[{l:'قبطي',k:'coptic',m:15},{l:'تسميع',k:'oral',m:20}] },
-                        ].map((exam, ei) => {
+                        ]).map((exam, ei) => {
                           const data = exam.data || {};
                           const base = (exam.subs||[]).reduce((sum,sub)=>sum+(parseFloat(data[sub.k])||0),0);
                           const bonus = parseFloat(data.bonus||0);
@@ -2803,6 +3013,34 @@ return {success:true};
 )}
 
         {/* ── Absent Modal ── */}
+        {showEndTermConfirm && (
+          <div className="modal-overlay" onClick={()=>{ if(!isEndingTerm){ setShowEndTermConfirm(false); setEndTermPassword(''); } }}>
+            <div className="modal" style={{ maxWidth:400 }} onClick={e=>e.stopPropagation()}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+                <h2 style={{ fontWeight:900, fontSize:16, color:'var(--rose)' }}>⚠️ إنهاء الترم {currentTerm?.term_number}</h2>
+                <button onClick={()=>{ setShowEndTermConfirm(false); setEndTermPassword(''); }} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)' }}><XCircle size={22}/></button>
+              </div>
+              <p style={{ color:'var(--muted)', fontSize:13, marginBottom:14, lineHeight:1.7 }}>
+                الترم الحالي هيترحّل للأرشيف (تقدر تعدله بعدين لو حبيت)، وهيتفتح الترم اللي بعده تلقائي
+                {currentTerm?.term_number === 2 ? ' — وده هيكون الترم التالت (فاينال بس من غير شهري).' : '.'}
+              </p>
+              <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--text)', marginBottom:6 }}>اكتب الباسورد للتأكيد</label>
+              <input
+                type="password" className="inp" value={endTermPassword}
+                onChange={e=>setEndTermPassword(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter') endTerm(); }}
+                placeholder="••••••" style={{ marginBottom:16 }} autoFocus
+              />
+              <div style={{ display:'flex', gap:8 }}>
+                <button onClick={()=>{ setShowEndTermConfirm(false); setEndTermPassword(''); }} className="btn btn-sm" style={{ flex:1, background:'var(--inp-bg)', color:'var(--text)' }}>إلغاء</button>
+                <button onClick={endTerm} disabled={isEndingTerm} className="btn btn-sm" style={{ flex:1, background:'var(--rose)', color:'#fff' }}>
+                  {isEndingTerm ? 'جاري...' : 'تأكيد الإنهاء'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showAbsentModal && selectedSessionAbsent !== null && (
           <div className="modal-overlay" onClick={()=>setShowAbsentModal(false)}>
             <div className="modal" style={{ maxWidth:500 }} onClick={e=>e.stopPropagation()}>
@@ -2850,6 +3088,11 @@ return {success:true};
           </button>
           <span className="shimmer" style={{ fontWeight:900, fontSize:14 }}>الألحان</span>
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            {currentTerm && (
+              <span style={{ fontSize:10, fontWeight:800, color:'var(--violet)', background:'rgba(139,92,246,.1)', border:'1px solid rgba(139,92,246,.25)', borderRadius:99, padding:'4px 9px', whiteSpace:'nowrap' }}>
+                ترم {currentTerm.term_number}
+              </span>
+            )}
             <div style={{ display:'flex',alignItems:'center',gap:5,background:'var(--gold-glow)',border:'1px solid var(--border-g)',borderRadius:99,padding:'4px 9px' }}>
               <div style={{ width:22,height:22,borderRadius:'50%',background:'linear-gradient(135deg,var(--violet),var(--gold))',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,color:'#fff',fontWeight:900 }}>
                 {currentUser?.name?.charAt(0)||'👤'}
@@ -3123,6 +3366,52 @@ return {success:true};
                   <button onClick={()=>setCurrentPage('qr-scanner')} className="btn btn-teal btn-sm"><Camera size={14}/> Scan QR</button>
                 </div>
 
+                {/* لوحة التحكم بالترم */}
+                <div className="glass" style={{ padding:'12px 14px', marginBottom:10, display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+                  <div>
+                    <p style={{ fontWeight:900, fontSize:14, color:'var(--gold)' }}>
+                      الترم {effectiveTerm?.term_number ?? '—'} {effectiveTerm?.has_monthly===false && <span style={{ color:'var(--rose)', fontSize:11 }}>(فاينال فقط)</span>}
+                    </p>
+                    <p style={{ color:'var(--muted)', fontSize:11 }}>{effectiveTerm?.academic_year || ''} · عدد الحصص: {sessionCount}</p>
+                  </div>
+                  <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                    {allTerms.length > 1 && (
+                      <select
+                        value={viewingTermId || currentTerm?.id || ''}
+                        onChange={e => {
+                          const tid = Number(e.target.value);
+                          if (tid === currentTerm?.id) switchViewingTerm(null);
+                          else switchViewingTerm(tid);
+                        }}
+                        className="inp" style={{ width:'auto', fontSize:12, padding:'6px 10px' }}
+                      >
+                        {allTerms.map(t => (
+                          <option key={t.id} value={t.id}>
+                            ترم {t.term_number} {t.status==='archived' ? '(مؤرشف)' : '(نشط)'}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {!isViewingArchived && (
+                      <>
+                        <button onClick={addSession} disabled={isAddingSession} className="btn btn-teal btn-sm">
+                          <Plus size={14}/> إضافة حصة
+                        </button>
+                        <button onClick={()=>setShowEndTermConfirm(true)} className="btn btn-sm" style={{ background:'var(--rose)', color:'#fff' }}>
+                          إنهاء الترم
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {isViewingArchived && (
+                  <div className="glass" style={{ padding:'10px 14px', marginBottom:16, background:'rgba(244,63,94,.06)', borderColor:'rgba(244,63,94,.2)', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
+                    <span style={{ fontSize:12, color:'var(--rose)', fontWeight:700 }}>⚠️ بتعدّل في ترم مؤرشف (ترم {effectiveTerm?.term_number}) — أي تعديل هنا هيتسجل في نفس الترم القديم</span>
+                    <button onClick={()=>switchViewingTerm(null)} className="btn btn-sm" style={{ background:'var(--gold)', color:'#000' }}>رجوع للترم النشط</button>
+                  </div>
+                )}
+
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:16 }}>
                   {[1,2,3].map(sn => {
                     const cnt = students.filter(s=>attendance[s.id]?.[sn-1]).length;
@@ -3154,7 +3443,7 @@ return {success:true};
                         <tr>
                           <th style={{ position:'sticky', right:0, background:'var(--tbl-head)', zIndex:2 }}>#</th>
 <th style={{ position:'sticky', right:28, background:'var(--tbl-head)', minWidth:110, zIndex:2 }}>الطالب</th>
-                          {Array.from({length:12},(_,i) => (
+                          {Array.from({length:sessionCount},(_,i) => (
                             <th key={i} style={{ textAlign:'center', minWidth:58 }}>
                               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
                                 <div style={{ display:'flex', gap:3 }}>
@@ -3180,12 +3469,12 @@ return {success:true};
                             <tr key={s.id}>
                               <td style={{ color:'var(--muted)', fontWeight:700, position:'sticky', right:0, background:'var(--bg-card)', zIndex:1 }}>{idx+1}</td>
 <td style={{ fontWeight:700, whiteSpace:'nowrap', fontSize:12, position:'sticky', right:28, background:'var(--bg-card)', zIndex:1 }}>{s.name}</td>
-                              {Array.from({length:12},(_,i) => (
+                              {Array.from({length:sessionCount},(_,i) => (
                                 <td key={i} style={{ textAlign:'center' }}>
                                   <input type="checkbox" className="chk" checked={attendance[s.id]?.[i]||false} onChange={()=>toggleAttendance(s.id,i)} disabled={lockedSessions[i]}/>
                                 </td>
                               ))}
-                              <td style={{ textAlign:'center', fontWeight:800, color:'var(--violet)', fontSize:12 }}>{attended}/12</td>
+                              <td style={{ textAlign:'center', fontWeight:800, color:'var(--violet)', fontSize:12 }}>{attended}/{sessionCount}</td>
                               <td style={{ textAlign:'center', fontWeight:900, color:'var(--gold)', fontSize:13 }}>{calcAtt(s.id)}</td>
                             </tr>
                           );
@@ -3261,7 +3550,7 @@ setTimeout(()=>{setIsScanPaused(false);setScannedStudentData(null);},1500);
                 <div className="glass" style={{ padding:18, marginBottom:14 }}>
                   <p style={{ fontWeight:800, marginBottom:12, fontSize:14, color:'var(--text)' }}>اختر الحصة:</p>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:7 }}>
-                    {Array.from({length:12},(_,i) => (
+                    {Array.from({length:sessionCount},(_,i) => (
                       <div key={i} style={{ position:'relative' }}>
                         <button onClick={()=>setSelectedSession(i+1)}
                           className={`sess-pill${selectedSession===i+1?' selected':''}`}
@@ -3293,7 +3582,30 @@ setTimeout(()=>{setIsScanPaused(false);setScannedStudentData(null);},1500);
             {/* ══ EXAMS ══ */}
             {currentPage === 'exams' && (
               <div className="anim-up">
-                <h1 className="page-title" style={{ marginBottom:16 }}>📝 الامتحانات</h1>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:16 }}>
+                  <h1 className="page-title" style={{ marginBottom:0 }}>📝 الامتحانات — ترم {effectiveTerm?.term_number ?? '—'}</h1>
+                  {allTerms.length > 1 && (
+                    <select
+                      value={viewingTermId || currentTerm?.id || ''}
+                      onChange={e => {
+                        const tid = Number(e.target.value);
+                        if (tid === currentTerm?.id) switchViewingTerm(null);
+                        else switchViewingTerm(tid);
+                      }}
+                      className="inp" style={{ width:'auto', fontSize:12, padding:'6px 10px' }}
+                    >
+                      {allTerms.map(t => (
+                        <option key={t.id} value={t.id}>ترم {t.term_number} {t.status==='archived' ? '(مؤرشف)' : '(نشط)'}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                {isViewingArchived && (
+                  <div className="glass" style={{ padding:'10px 14px', marginBottom:16, background:'rgba(244,63,94,.06)', borderColor:'rgba(244,63,94,.2)', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
+                    <span style={{ fontSize:12, color:'var(--rose)', fontWeight:700 }}>⚠️ بتعدّل في ترم مؤرشف</span>
+                    <button onClick={()=>switchViewingTerm(null)} className="btn btn-sm" style={{ background:'var(--gold)', color:'#000' }}>رجوع للترم النشط</button>
+                  </div>
+                )}
                 <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
                   {examConfigs.map(ec => (
                     <button key={ec.type} onClick={()=>setCurrentExam(ec.type)}
@@ -3527,6 +3839,117 @@ setTimeout(()=>{setIsScanPaused(false);setScannedStudentData(null);},1500);
                         })}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══ التقرير السنوي (كل الترمات جنب بعض) ══ */}
+            {currentPage === 'yearly-report' && (
+              <div className="anim-up">
+                <div className="page-header">
+                  <h1 className="page-title">📅 التقرير السنوي</h1>
+                  <div style={{ display:'flex', gap:7 }}>
+                    <button onClick={loadYearlyReport} className="btn btn-teal btn-sm">🔄 تحديث</button>
+                    <button onClick={exportYearlyReportToExcel} className="btn btn-green btn-sm"><Download size={14}/> Excel</button>
+                  </div>
+                </div>
+
+                <p style={{ color:'var(--muted)', fontSize:12, marginBottom:14 }}>
+                  السنة الدراسية: <b style={{ color:'var(--gold)' }}>{currentTerm?.academic_year || '-'}</b> · الترمات المتاحة لحد دلوقتي: {allTerms.map(t=>t.term_number).join(' / ') || '-'}
+                </p>
+
+                {loadingYearly ? (
+                  <div className="glass" style={{ padding:40, textAlign:'center', color:'var(--muted)' }}>جاري التحميل...</div>
+                ) : allTerms.length === 0 ? (
+                  <div className="glass" style={{ padding:40, textAlign:'center', color:'var(--muted)' }}>مفيش ترمات متسجلة لسه</div>
+                ) : (
+                  <div className="glass" style={{ padding:16 }}>
+                    <div className="tbl-wrap">
+                      <table className="tbl">
+                        <thead>
+                          <tr>
+                            <th>#</th><th>الطالب</th>
+                            {allTerms.map(t => (
+                              <th key={t.id} style={{ textAlign:'center' }}>ترم {t.term_number}{t.has_monthly===false && <span style={{ fontSize:9, color:'var(--rose)' }}> (فاينال)</span>}</th>
+                            ))}
+                            <th style={{ textAlign:'center', background:'rgba(184,134,11,.06)', color:'var(--gold)' }}>المتوسط السنوي</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {students.map((s,i) => {
+                            const terms = allTerms.map(t => yearlyData[s.id]?.[t.id]);
+                            const valid = terms.filter(Boolean);
+                            const avg = valid.length ? (valid.reduce((sum,d)=>sum+parseFloat(d.total),0)/valid.length).toFixed(2) : '-';
+                            return (
+                              <tr key={s.id} onClick={()=>setSelectedYearlyStudent(s.id)} style={{ cursor:'pointer' }}>
+                                <td style={{ fontWeight:800, color:'var(--muted)' }}>{i+1}</td>
+                                <td style={{ fontWeight:700, fontSize:13 }}>{s.name}</td>
+                                {allTerms.map(t => {
+                                  const d = yearlyData[s.id]?.[t.id];
+                                  const gr = d ? getGrade(parseFloat(d.total)) : null;
+                                  return (
+                                    <td key={t.id} style={{ textAlign:'center', fontWeight:800, fontSize:13, color: gr?.color || 'var(--muted)' }}>
+                                      {d ? d.total : '—'}
+                                    </td>
+                                  );
+                                })}
+                                <td style={{ textAlign:'center', fontWeight:900, fontSize:16, color:'var(--gold)', background:'var(--gold-glow)' }}>{avg}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p style={{ color:'var(--muted)', fontSize:11, marginTop:10 }}>* اضغط على أي طالب لعرض تفاصيل درجاته في كل ترم</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Modal تفاصيل الطالب في التقرير السنوي */}
+            {selectedYearlyStudent !== null && (
+              <div className="modal-overlay" onClick={()=>setSelectedYearlyStudent(null)}>
+                <div className="modal" style={{ maxWidth:560 }} onClick={e=>e.stopPropagation()}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+                    <h2 style={{ fontWeight:900, fontSize:16 }}>{students.find(s=>s.id===selectedYearlyStudent)?.name}</h2>
+                    <button onClick={()=>setSelectedYearlyStudent(null)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)' }}><XCircle size={22}/></button>
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                    {allTerms.map(t => {
+                      const d = yearlyData[selectedYearlyStudent]?.[t.id];
+                      if (!d) return (
+                        <div key={t.id} className="glass" style={{ padding:12, opacity:.6 }}>
+                          <p style={{ fontWeight:800, fontSize:13 }}>ترم {t.term_number}</p>
+                          <p style={{ color:'var(--muted)', fontSize:11 }}>مفيش بيانات لسه</p>
+                        </div>
+                      );
+                      const gr = getGrade(parseFloat(d.total));
+                      return (
+                        <div key={t.id} className="glass" style={{ padding:14 }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                            <p style={{ fontWeight:900, fontSize:14, color:'var(--gold)' }}>ترم {t.term_number} {d.hasMonthly===false && <span style={{ fontSize:10, color:'var(--rose)' }}>(فاينال فقط)</span>}</p>
+                            <span style={{ fontWeight:900, fontSize:20, color:'var(--gold)' }}>{d.total}<span style={{ fontSize:11, color:gr.color, marginRight:6 }}>{gr.text}</span></span>
+                          </div>
+                          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, fontSize:11 }}>
+                            <div style={{ textAlign:'center' }}>
+                              <p style={{ color:'var(--muted)' }}>الحضور</p>
+                              <p style={{ fontWeight:800, color:'var(--teal)' }}>{d.attendedCount}/{d.heldCount}</p>
+                            </div>
+                            {d.hasMonthly !== false && (
+                              <div style={{ textAlign:'center' }}>
+                                <p style={{ color:'var(--muted)' }}>الشهري</p>
+                                <p style={{ fontWeight:800, color:'#3b82f6' }}>{(d.monthly.coptic+d.monthly.liturgy+d.monthly.oral).toFixed(1)}{d.monthly.bonus?` +${d.monthly.bonus}`:''}</p>
+                              </div>
+                            )}
+                            <div style={{ textAlign:'center' }}>
+                              <p style={{ color:'var(--muted)' }}>الفاينال</p>
+                              <p style={{ fontWeight:800, color:'var(--rose)' }}>{(d.final.coptic+d.final.oral).toFixed(1)}{d.final.bonus?` +${d.final.bonus}`:''}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
