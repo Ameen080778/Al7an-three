@@ -354,7 +354,7 @@ const GlobalStyles = () => (
     .prog-fill  { height: 100%; border-radius: 99px; transition: width .5s cubic-bezier(.16,1,.3,1); }
 
     /* ── Checkbox ── */
-    .chk { width: 16px; height: 16px; cursor: pointer; accent-color: var(--gold); }
+    .chk { width: 20px; height: 20px; cursor: pointer; accent-color: var(--gold); }
     .chk:disabled { opacity: .3; cursor: not-allowed; }
 
     /* ── Score input ── */
@@ -1105,11 +1105,11 @@ const App = () => {
   const sessionCount = effectiveTerm?.session_count || 0;
   const emptySessions = () => Array(sessionCount).fill(false);
 
-  // لما عدد الحصص يتغيّر، نظبط طول lockedSessions بنفس القياس
-  // (الحصص القديمة تفضل زي ما هي مقفولة/مفتوحة، والحصة الجديدة تتفتح تلقائي)
+  // لما عدد الحصص يتغيّر (أو بعد أي تحديث/ريفرش)، الحصص كلها تبدأ مقفولة زي ما هو مفروض،
+  // وأي فتح ليها بيدوي وبيفضل لحد ما تعمل ريفرش تاني (مش بيتسجل في قاعدة البيانات)
   useEffect(() => {
     setLockedSessions(prev => {
-      const next = Array(sessionCount).fill(false);
+      const next = Array(sessionCount).fill(true);
       for (let i = 0; i < Math.min(prev.length, sessionCount); i++) next[i] = prev[i];
       return next;
     });
@@ -1152,16 +1152,17 @@ const App = () => {
           const held = heldByTerm[tid];
           let attended = 0;
           for (let i=0;i<held;i++){ if (sessions[i]===true) attended++; }
-          const attScore = held>0 ? (attended/held*30) : 0;
+          const attWeight = term.has_monthly === false ? 50 : 30;
+          const attScore = held>0 ? (attended/held*attWeight) : 0;
           const m = { coptic:examRow?.m_coptic||0, liturgy:examRow?.m_liturgy||0, oral:examRow?.m_oral||0, bonus:examRow?.m_bonus||0 };
-          const f = { coptic:examRow?.f_coptic||0, oral:examRow?.f_oral||0, bonus:examRow?.f_bonus||0 };
+          const f = { coptic:examRow?.f_coptic||0, liturgy:examRow?.f_liturgy||0, oral:examRow?.f_oral||0, bonus:examRow?.f_bonus||0 };
           const mRaw = m.coptic+m.liturgy+m.oral;
-          const fRaw = f.coptic+f.oral;
+          const fRaw = f.coptic+f.liturgy+f.oral;
           let total;
           if (term.has_monthly === false) {
-            total = (((attScore + fRaw) / 65) * 100) + f.bonus;
+            total = attScore + fRaw + f.bonus;
           } else {
-            total = (((attScore + mRaw + fRaw) / 95) * 100) + m.bonus + f.bonus;
+            total = (((attScore + mRaw + fRaw) / 110) * 100) + m.bonus + f.bonus;
           }
           data[s.id][tid] = {
             attendance: attScore.toFixed(2), attendedCount: attended, heldCount: held,
@@ -1389,16 +1390,16 @@ const App = () => {
     const row = Array.isArray(data) ? data[0] : data;
     if (error || !row) return null;
     const mRaw = (row.m_coptic||0)+(row.m_liturgy||0)+(row.m_oral||0);
-    const fRaw = (row.f_coptic||0)+(row.f_oral||0);
+    const fRaw = (row.f_coptic||0)+(row.f_liturgy||0)+(row.f_oral||0); // قبطي15+طقس15+تسميع20 = 50 دايمًا
     const mBonus = row.m_bonus||0; const fBonus = row.f_bonus||0;
     const attScore = parseFloat(row.attendance_score||0);
     let tot;
     if (row.has_monthly === false) {
-      // ترم من غير شهري: (حضور30 + فاينال35) ÷ 65 × 100 + بونص الفاينال
-      const base = ((attScore + fRaw) / 65 * 100);
-      tot = (base + fBonus).toFixed(2);
+      // ترم من غير شهري: حضور50 + فاينال50 = 100 مباشرة + بونص
+      tot = (attScore + fRaw + fBonus).toFixed(2);
     } else {
-      const base = ((attScore + mRaw + fRaw) / 95 * 100);
+      // ترم عادي: (حضور30 + شهر30 + فاينال50) ÷ 110 × 100 + بونص
+      const base = ((attScore + mRaw + fRaw) / 110 * 100);
       tot = (base + mBonus + fBonus).toFixed(2);
     }
 
@@ -1415,7 +1416,7 @@ const App = () => {
       hasMonthly: row.has_monthly !== false, termNumber: row.term_number, academicYear: row.academic_year,
       attendance: attScore.toFixed(2), attendedCount: row.attended_count, totalSessions: row.total_sessions,
       monthly: { coptic:row.m_coptic||0, liturgy:row.m_liturgy||0, oral:row.m_oral||0, bonus:mBonus, total:mRaw.toFixed(1) },
-      final:   { coptic:row.f_coptic||0, oral:row.f_oral||0, bonus:fBonus, total:fRaw.toFixed(1) },
+      final:   { coptic:row.f_coptic||0, liturgy:row.f_liturgy||0, oral:row.f_oral||0, bonus:fBonus, total:fRaw.toFixed(1) },
       total: tot, grade: getGrade(parseFloat(tot)), rank
     };
   };
@@ -1618,16 +1619,15 @@ const App = () => {
       const m  = exams[sid]?.monthly || {};
       const f  = exams[sid]?.final   || {};
       const mRaw = (m.coptic||0)+(m.liturgy||0)+(m.oral||0);
+      const fRaw = (f.coptic||0)+(f.liturgy||0)+(f.oral||0); // قبطي15 + طقس15 + تسميع20 = 50 (في كل الترمات)
       const mBonus = m.bonus||0;
       const fBonus = f.bonus||0;
       if (effectiveTerm?.has_monthly === false) {
-        // ترم من غير امتحان شهري: حضور50 + فاينال50 (قبطي15+طقس15+تسميع20) = 100 مباشرة + بونص
-        const fRaw = (f.coptic||0)+(f.liturgy||0)+(f.oral||0);
+        // ترم من غير امتحان شهري: حضور50 + فاينال50 = 100 مباشرة + بونص
         return (att + fRaw + fBonus).toFixed(2);
       }
-      const fRaw = (f.coptic||0)+(f.oral||0);
-      // تحويل: (حضور30 + شهر30 + فاينال35) ÷ 95 × 100 + بونص
-      const base = ((att + mRaw + fRaw) / 95 * 100);
+      // ترم عادي: (حضور30 + شهر30 + فاينال50) ÷ 110 × 100 + بونص
+      const base = ((att + mRaw + fRaw) / 110 * 100);
       return (base + mBonus + fBonus).toFixed(2);
     };
   }, [attendance, exams, calcAtt, effectiveTerm]);
@@ -1868,21 +1868,14 @@ return {success:true};
     { type:'final', title:'امتحان الفاينال', color:'#f43f5e',
       fields:[
         { key:'coptic',  label:'قبطي',   max:15 },
+        { key:'liturgy', label:'طقس',    max:15 },
         { key:'oral',    label:'تسميع',  max:20 },
         { key:'bonus',   label:'بونص 🎁', max:null },
-      ], total:35 },
+      ], total:50 },
   ];
-  // فاينال الترم من غير شهري (زي الترم التالت): قبطي15 + طقس15 + تسميع20 = 50
-  const finalNoMonthlyConfig = { type:'final', title:'امتحان الفاينال', color:'#f43f5e',
-    fields:[
-      { key:'coptic',  label:'قبطي',   max:15 },
-      { key:'liturgy', label:'طقس',    max:15 },
-      { key:'oral',    label:'تسميع',  max:20 },
-      { key:'bonus',   label:'بونص 🎁', max:null },
-    ], total:50 };
-  // الترم من غير شهري (زي الترم التالت) → تاب الشهري يتخفي، والفاينال بتوزيع مختلف
+  // الفاينال نفس التوزيع في كل الترمات (قبطي15 + طقس15 + تسميع20 = 50)؛ الفرق إن الترم من غير شهري معندوش تاب شهري خالص
   const examConfigs = effectiveTerm?.has_monthly === false
-    ? [finalNoMonthlyConfig]
+    ? allExamConfigs.filter(e => e.type !== 'monthly')
     : allExamConfigs;
   const examCfg = examConfigs.find(e => e.type===currentExam) || examConfigs[0];
 
@@ -2278,15 +2271,14 @@ return {success:true};
                 </div>
 
                 {/* Exam rows */}
-                {(studentResult.hasMonthly === false ? [
-                  { label:'الامتحان النهائي', icon:'🏆', data:studentResult.final, max:50, color:'var(--rose)', bg:'rgba(244,63,94,.06)', border:'rgba(244,63,94,.15)', d:'.08s', showBreakdown:true,
+                {[
+                  ...(studentResult.hasMonthly === false ? [] : [
+                    { label:'امتحان الشهر', icon:'📝', data:studentResult.monthly, max:30, color:'#3b82f6', bg:'rgba(59,130,246,.06)', border:'rgba(59,130,246,.15)', d:'.08s', showBreakdown:false,
+                      subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
+                  ]),
+                  { label:'الامتحان النهائي', icon:'🏆', data:studentResult.final, max:50, color:'var(--rose)', bg:'rgba(244,63,94,.06)', border:'rgba(244,63,94,.15)', d:'.16s', showBreakdown:true,
                     subs:[{l:'قبطي',k:'coptic',m:15},{l:'طقس',k:'liturgy',m:15},{l:'تسميع',k:'oral',m:20}] },
-                ] : [
-                  { label:'امتحان الشهر', icon:'📝', data:studentResult.monthly, max:30, color:'#3b82f6', bg:'rgba(59,130,246,.06)', border:'rgba(59,130,246,.15)', d:'.08s', showBreakdown:false,
-                    subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
-                  { label:'الامتحان النهائي', icon:'🏆', data:studentResult.final, max:35, color:'var(--rose)', bg:'rgba(244,63,94,.06)', border:'rgba(244,63,94,.15)', d:'.16s', showBreakdown:true,
-                    subs:[{l:'قبطي',k:'coptic',m:15},{l:'تسميع',k:'oral',m:20}] },
-                ]).map((exam, ei) => {
+                ].map((exam, ei) => {
                   const data = exam.data || {};
                   const baseScore = (exam.subs||[]).reduce((sum,sub)=>sum+(parseFloat(data[sub.k])||0),0);
                   const bonus = parseFloat(data.bonus||0);
@@ -2775,15 +2767,14 @@ return {success:true};
                           </div>
                         </div>
 
-                        {(publicStudentResult.hasMonthly === false ? [
+                        {[
+                          ...(publicStudentResult.hasMonthly === false ? [] : [
+                            { label:'امتحان الشهر', icon:'📝', data:publicStudentResult.monthly, max:30, color:'#3b82f6', showBreakdown:false,
+                              subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
+                          ]),
                           { label:'الامتحان النهائي', icon:'🏆', data:publicStudentResult.final, max:50, color:'var(--rose)', showBreakdown:true,
                             subs:[{l:'قبطي',k:'coptic',m:15},{l:'طقس',k:'liturgy',m:15},{l:'تسميع',k:'oral',m:20}] },
-                        ] : [
-                          { label:'امتحان الشهر', icon:'📝', data:publicStudentResult.monthly, max:30, color:'#3b82f6', showBreakdown:false,
-                            subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
-                          { label:'الامتحان النهائي', icon:'🏆', data:publicStudentResult.final, max:35, color:'var(--rose)', showBreakdown:true,
-                            subs:[{l:'قبطي',k:'coptic',m:15},{l:'تسميع',k:'oral',m:20}] },
-                        ]).map((exam, ei) => {
+                        ].map((exam, ei) => {
                           const data = exam.data || {};
                           const base = (exam.subs||[]).reduce((sum,sub)=>sum+(parseFloat(data[sub.k])||0),0);
                           const bonus = parseFloat(data.bonus||0);
@@ -3441,8 +3432,8 @@ return {success:true};
                     <table className="tbl" style={{ minWidth:820 }}>
                       <thead>
                         <tr>
-                          <th style={{ position:'sticky', right:0, background:'var(--tbl-head)', zIndex:2 }}>#</th>
-<th style={{ position:'sticky', right:28, background:'var(--tbl-head)', minWidth:110, zIndex:2 }}>الطالب</th>
+                          <th style={{ background:'var(--tbl-head)' }}>#</th>
+<th style={{ background:'var(--tbl-head)', minWidth:110 }}>الطالب</th>
                           {Array.from({length:sessionCount},(_,i) => (
                             <th key={i} style={{ textAlign:'center', minWidth:58 }}>
                               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
@@ -3467,8 +3458,8 @@ return {success:true};
                           const attended = attendance[s.id]?.filter(Boolean).length||0;
                           return (
                             <tr key={s.id}>
-                              <td style={{ color:'var(--muted)', fontWeight:700, position:'sticky', right:0, background:'var(--bg-card)', zIndex:1 }}>{idx+1}</td>
-<td style={{ fontWeight:700, whiteSpace:'nowrap', fontSize:12, position:'sticky', right:28, background:'var(--bg-card)', zIndex:1 }}>{s.name}</td>
+                              <td style={{ color:'var(--muted)', fontWeight:700 }}>{idx+1}</td>
+<td style={{ fontWeight:700, whiteSpace:'nowrap', fontSize:12 }}>{s.name}</td>
                               {Array.from({length:sessionCount},(_,i) => (
                                 <td key={i} style={{ textAlign:'center' }}>
                                   <input type="checkbox" className="chk" checked={attendance[s.id]?.[i]||false} onChange={()=>toggleAttendance(s.id,i)} disabled={lockedSessions[i]}/>
