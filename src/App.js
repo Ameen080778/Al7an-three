@@ -3266,7 +3266,7 @@ return {success:true};
                     <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px,1fr))', gap:10, marginBottom:12 }}>
                       <input className="inp" type="text" placeholder="اسم الطالب *" value={newStudent.name} onChange={e=>setNewStudent({...newStudent,name:e.target.value})}/>
                       <select className="inp" value={newStudent.age} onChange={e=>setNewStudent({...newStudent,age:e.target.value})}>
-                        <option value="4">سنة 4</option><option value="5">سنة 5</option><option value="6">سنة 6</option>
+                        <option value="4">سنة 4</option><option value="5">سنة 5</option><option value="6">سنة 6</option>  <option value="1 اعدادي">سنة 1 اعدادي</option> 
                       </select>
                       <input className="inp" type="text" placeholder="رقم الهاتف" value={newStudent.phone} onChange={e=>setNewStudent({...newStudent,phone:e.target.value})}/>
                       <input className="inp" type="text" placeholder="ملاحظات" value={newStudent.notes} onChange={e=>setNewStudent({...newStudent,notes:e.target.value})}/>
@@ -3296,7 +3296,7 @@ return {success:true};
                                 <td style={{ color:'var(--muted)', fontWeight:700 }}>{i+1}</td>
                                 <td><input className="inp" type="text" value={editingStudent.name} onChange={e=>setEditingStudent({...editingStudent,name:e.target.value})} style={{ padding:'5px 9px', fontSize:12 }}/></td>
                                 <td><span className="badge badge-violet">{s.student_code||'-'}</span></td>
-                                <td><select className="inp" value={editingStudent.age||'5'} onChange={e=>setEditingStudent({...editingStudent,age:e.target.value})} style={{ padding:'5px 9px', fontSize:12, width:'auto' }}><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></td>
+                                <td><select className="inp" value={editingStudent.age||'5'} onChange={e=>setEditingStudent({...editingStudent,age:e.target.value})} style={{ padding:'5px 9px', fontSize:12, width:'auto' }}><option value="4">4</option><option value="5">5</option><option value="6">6</option> <option value="1 اعدادي">سنة 1 اعدادي</option></select></td>
                                 <td className="hide-mobile"><input className="inp" type="text" value={editingStudent.phone} onChange={e=>setEditingStudent({...editingStudent,phone:e.target.value})} style={{ padding:'5px 9px', fontSize:12 }}/></td>
                                 <td className="hide-mobile"><input className="inp" type="text" value={editingStudent.notes} onChange={e=>setEditingStudent({...editingStudent,notes:e.target.value})} style={{ padding:'5px 9px', fontSize:12 }}/></td>
                                 <td style={{ textAlign:'center' }}>
