@@ -1007,7 +1007,7 @@ const App = () => {
   useEffect(() => {
     if (publicStudentResult) {
       setRingReady(false);
-      const t = setTimeout(() => setRingReady(true), 900);
+      const t = setTimeout(() => setRingReady(true), 60);
       return () => clearTimeout(t);
     } else {
       setRingReady(false);
@@ -1664,7 +1664,7 @@ const App = () => {
     if (s >= 75) return { text:'جيد جداً', color:'var(--teal)' };
     if (s >= 65) return { text:'جيد',      color:'var(--gold)' };
     if (s >= 50) return { text:'مقبول',    color:'#f59e0b' };
-    return { text:'⏳⏳', color:'var(--rose)' };
+    return { text:'يحتاج متابعة', color:'var(--rose)' };
   };
 
   const copyToClipboard = (code) => {
@@ -1689,13 +1689,13 @@ const App = () => {
     if (!s) { setResultError('الكود غير صحيح!'); return; }
     const as = calcAtt(s.id);
     const md = exams[s.id]?.monthly || {coptic:0,liturgy:0,oral:0,bonus:0};
-    const fd = exams[s.id]?.final   || {coptic:0,oral:0,bonus:0};
+    const fd = exams[s.id]?.final   || {coptic:0,liturgy:0,oral:0,bonus:0};
     const mRaw3 = (md.coptic||0)+(md.liturgy||0)+(md.oral||0);
-    const fRaw3 = (fd.coptic||0)+(fd.oral||0);
-    const base3 = ((parseFloat(as)+mRaw3+fRaw3)/95*100);
-    const tot = (base3+(md.bonus||0)+(fd.bonus||0)).toFixed(2);
+    const fRaw3 = (fd.coptic||0)+(fd.liturgy||0)+(fd.oral||0);
+    const tot = calcTotal(s.id); // نفس المعادلة المستخدمة في كل مكان
     setStudentResult({
       name:s.name, age:s.age, attendance:as,
+      hasMonthly: effectiveTerm?.has_monthly !== false,
       monthly:{...md, total:mRaw3.toFixed(1)},
       final:{...fd, total:fRaw3.toFixed(1)},
       total:tot, grade:getGrade(parseFloat(tot))
@@ -2765,7 +2765,7 @@ return {success:true};
                       {!ringReady && <p className="melody-loading-label">🎯 بيتحسب درجتك...</p>}
 
                       <div className="melody-seal" style={{ color:publicStudentResult.grade.color, opacity: ringReady ? 1 : 0, transform: ringReady ? 'scale(1)' : 'scale(.9)' }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        {parseFloat(publicStudentResult.total) >= 50 && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                         {publicStudentResult.grade.text}
                       </div>
                     </div>
@@ -2872,19 +2872,7 @@ return {success:true};
                         <hr className="manuscript-rule" />
 
                         <p className="manuscript-title">🎉 تهنئك لنجاحك 🎉</p>
-                        <p className="manuscript-body">
-                          اجتزت السنة الأولى بنجاح، ودلوقتي هتبدأ معانا رحلة جديدة في السنة الثانية ✨
-                        </p>
-
-                        <div className="manuscript-sched">
-                          <svg className="manuscript-sched-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                            <rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2v4M16 2v4M3 9h18" strokeLinecap="round"/>
-                          </svg>
-                          <div style={{ textAlign:'right' }}>
-                            <p className="manuscript-sched-label">📅 مواعيد السنة الدراسية الثانية</p>
-                            <p className="manuscript-sched-value">يوم الأربعاء - الساعة ٧:٣٠ مساءً</p>
-                          </div>
-                        </div>
+                        
 
                         {/* الختم الشمعي */}
                         <div className="wax-seal">
@@ -3774,9 +3762,11 @@ setTimeout(()=>{setIsScanPaused(false);setScannedStudentData(null);},1500);
                     </div>
                     <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:14 }}>
                       {[
-                        { label:'درجة الحضور', val:`${studentResult.attendance} / 30`, color:'var(--teal)', detail:null },
-                        { label:'امتحان الشهر', val:`${studentResult.monthly.total} / 30`, color:'#3b82f6', detail:`قبطي: ${studentResult.monthly.coptic} | طقس: ${studentResult.monthly.liturgy} | تسميع: ${studentResult.monthly.oral} | بونص: ${studentResult.monthly.bonus}` },
-                        { label:'الامتحان النهائي', val:`${studentResult.final.total} / 35`, color:'var(--rose)', detail:`قبطي: ${studentResult.final.coptic} | تسميع: ${studentResult.final.oral} | بونص: ${studentResult.final.bonus}` },
+                        { label:'درجة الحضور', val:`${studentResult.attendance} / ${studentResult.hasMonthly===false?50:30}`, color:'var(--teal)', detail:null },
+                        ...(studentResult.hasMonthly===false ? [] : [
+                          { label:'امتحان الشهر', val:`${studentResult.monthly.total} / 30`, color:'#3b82f6', detail:`قبطي: ${studentResult.monthly.coptic} | طقس: ${studentResult.monthly.liturgy} | تسميع: ${studentResult.monthly.oral} | بونص: ${studentResult.monthly.bonus||0}` },
+                        ]),
+                        { label:'الامتحان النهائي', val:`${studentResult.final.total} / 50`, color:'var(--rose)', detail:`قبطي: ${studentResult.final.coptic} | طقس: ${studentResult.final.liturgy} | تسميع: ${studentResult.final.oral} | بونص: ${studentResult.final.bonus||0}` },
                       ].map((row,i) => (
                         <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 14px', background:'var(--inp-bg)', border:'1px solid var(--border)', borderRadius:11 }}>
                           <div>
