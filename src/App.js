@@ -1664,7 +1664,7 @@ const App = () => {
     if (s >= 75) return { text:'جيد جداً', color:'var(--teal)' };
     if (s >= 65) return { text:'جيد',      color:'var(--gold)' };
     if (s >= 50) return { text:'مقبول',    color:'#f59e0b' };
-    return { text:'يحتاج متابعة', color:'var(--rose)' };
+    return { text:'⏳⏳', color:'var(--rose)' };
   };
 
   const copyToClipboard = (code) => {
