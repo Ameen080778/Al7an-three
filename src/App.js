@@ -2307,7 +2307,7 @@ return {success:true};
                 {/* Exam rows */}
                 {[
                   ...(studentResult.hasMonthly === false ? [] : [
-                    { label:'امتحان الشهر', icon:'📝', data:studentResult.monthly, max:30, color:'#3b82f6', bg:'rgba(59,130,246,.06)', border:'rgba(59,130,246,.15)', d:'.08s', showBreakdown:false,
+                    { label:'امتحان الشهر', icon:'📝', data:studentResult.monthly, max:30, color:'#3b82f6', bg:'rgba(59,130,246,.06)', border:'rgba(59,130,246,.15)', d:'.08s', showBreakdown:true,
                       subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
                   ]),
                   { label:'الامتحان النهائي', icon:'🏆', data:studentResult.final, max:50, color:'var(--rose)', bg:'rgba(244,63,94,.06)', border:'rgba(244,63,94,.15)', d:'.16s', showBreakdown:true,
@@ -2799,7 +2799,7 @@ return {success:true};
 
                         {[
                           ...(publicStudentResult.hasMonthly === false ? [] : [
-                            { label:'امتحان الشهر', icon:'📝', data:publicStudentResult.monthly, max:30, color:'#3b82f6', showBreakdown:false,
+                            { label:'امتحان الشهر', icon:'📝', data:publicStudentResult.monthly, max:30, color:'#3b82f6', showBreakdown:true,
                               subs:[{l:'قبطي',k:'coptic',m:10},{l:'طقس',k:'liturgy',m:10},{l:'تسميع',k:'oral',m:10}] },
                           ]),
                           { label:'الامتحان النهائي', icon:'🏆', data:publicStudentResult.final, max:50, color:'var(--rose)', showBreakdown:true,
@@ -2873,7 +2873,7 @@ return {success:true};
 
                         <hr className="manuscript-rule" />
 
-                        <p className="manuscript-title">🎉 تهنئك لنجاحك 🎉</p>
+                        <p className="manuscript-title">🎉 الترم الأول 🎉</p>
                         
 
                         {/* الختم الشمعي */}
