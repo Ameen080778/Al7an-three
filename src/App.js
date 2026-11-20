@@ -1415,8 +1415,13 @@ const App = () => {
   const fetchPublicStudentResultByCode = async (code) => {
     const normalizedCode = code.trim().toUpperCase();
     const { data, error } = await supabase.rpc('get_student_public_result', { p_code: normalizedCode });
+    if (error) {
+      // خطأ حقيقي من السيرفر (صلاحيات/دالة ناقصة/عمود غلط) — منعرضوش للطالب على إنه "كود غلط"
+      console.error('get_student_public_result error:', error);
+      throw error;
+    }
     const row = Array.isArray(data) ? data[0] : data;
-    if (error || !row) return null;
+    if (!row) return null;
     const mRaw = (row.m_coptic||0)+(row.m_liturgy||0)+(row.m_oral||0);
     const fRaw = (row.f_coptic||0)+(row.f_liturgy||0)+(row.f_oral||0); // قبطي15+طقس15+تسميع20 = 50 دايمًا
     const mBonus = row.m_bonus||0; const fBonus = row.f_bonus||0;
@@ -1770,6 +1775,7 @@ setIsScanPaused(true);
     if (!isLoggedIn && (currentPage==='student-check' || currentPage==='public-lessons')) {
       const tid = toast.loading('⏳ جاري التحقق...');
       await stopScanner();
+      isScanPausedRef.current = true; // stopScanner بيفك القفل — بنقفله تاني عشان نفس الـ QR ميتقراش أكتر من مرة
       try {
         const { data:vData, error:se } = await supabase.rpc('verify_student_code', { p_code: decodedText.trim().toUpperCase() });
         const sd = Array.isArray(vData) ? vData[0] : vData;
@@ -2384,10 +2390,6 @@ return {success:true};
   ══════════════════════════════════════════════ */
   if (!isLoggedIn && currentPage === 'public-lessons') {
     const publishedChants = chants.filter(c => c.is_published !== false);
-    if (chants.length === 0) {
-      supabase.from('chants').select('*').eq('is_published', true).order('order_num').order('name')
-        .then(({ data }) => setChants(data || []));
-    }
     return (
       <>
         <GlobalStyles />
@@ -2871,7 +2873,7 @@ return {success:true};
 
                         <hr className="manuscript-rule" />
 
-                        <p className="manuscript-title">🎉 الترم الأول 🎉</p>
+                        <p className="manuscript-title">🎉 تهنئك لنجاحك 🎉</p>
                         
 
                         {/* الختم الشمعي */}
