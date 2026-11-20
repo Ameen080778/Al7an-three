@@ -2871,7 +2871,7 @@ return {success:true};
 
                         <hr className="manuscript-rule" />
 
-                        <p className="manuscript-title">🎉 تهنئك لنجاحك 🎉</p>
+                        <p className="manuscript-title">🎉 الترم الأول 🎉</p>
                         
 
                         {/* الختم الشمعي */}
